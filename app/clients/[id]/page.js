@@ -59,7 +59,8 @@ function PillarCard({ pillarKey, pillar }) {
 }
 
 export default async function ClientDetailPage({ params }) {
-  const { client, runs } = await getClientWithRuns(params.id)
+  const { id } = await params
+  const { client, runs } = await getClientWithRuns(id)
   const latestRun = runs[0] || null
   const pillarsByKey = new Map((latestRun?.pillars || []).map(p => [p.pillar, p]))
 

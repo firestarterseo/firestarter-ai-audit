@@ -2,8 +2,9 @@ const { getSupabaseServerClient } = require('../../../../../lib/supabaseServer')
 const { runAudit } = require('../../../../../lib/runAudit')
 
 async function POST(request, { params }) {
+  const { id } = await params
   const supabase = getSupabaseServerClient()
-  const { data: client, error } = await supabase.from('clients').select('*').eq('id', params.id).single()
+  const { data: client, error } = await supabase.from('clients').select('*').eq('id', id).single()
   if (error) return Response.json({ error: error.message }, { status: 404 })
 
   try {
