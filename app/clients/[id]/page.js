@@ -40,6 +40,9 @@ function PillarCard({ pillarKey, pillar }) {
         </div>
         <div style={{ fontWeight: 600, fontSize: 14 }}>{PILLAR_LABELS[pillarKey]}</div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          {pillar.grade == null && (
+            <span className="pill pill-lead">not yet graded -- excluded from overall score</span>
+          )}
           {pillar.partial && (
             <span className="pill pill-lead" title={pillar.possible_points != null ? `Only ${pillar.possible_points}/100 possible points could be verified this run` : undefined}>
               partial -- {pillar.possible_points ?? '?'}/100 checked
