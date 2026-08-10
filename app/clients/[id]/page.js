@@ -1,5 +1,6 @@
 import { getClientWithRuns } from '../../../lib/data'
 import RunAuditButton from './RunAuditButton'
+import PromptTester from './PromptTester'
 
 export const dynamic = 'force-dynamic'
 
@@ -119,6 +120,10 @@ export default async function ClientDetailPage({ params }) {
           <p className="text-muted" style={{ margin: 0 }}>No audits run yet. Click &ldquo;Run audit now&rdquo; to grade this client for the first time.</p>
         </div>
       )}
+
+      <div style={{ marginTop: 24 }}>
+        <PromptTester clientId={client.id} />
+      </div>
 
       {runs.length > 1 && (
         <div style={{ marginTop: 32 }}>
