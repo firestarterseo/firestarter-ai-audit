@@ -39,9 +39,16 @@ function PillarCard({ pillarKey, pillar }) {
           {pillar.grade || '--'}
         </div>
         <div style={{ fontWeight: 600, fontSize: 14 }}>{PILLAR_LABELS[pillarKey]}</div>
-        {pillar.snapshot && (
-          <span className="pill pill-snapshot" style={{ marginLeft: 'auto' }}>snapshot, not tracked</span>
-        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          {pillar.partial && (
+            <span className="pill pill-lead" title={pillar.possible_points != null ? `Only ${pillar.possible_points}/100 possible points could be verified this run` : undefined}>
+              partial -- {pillar.possible_points ?? '?'}/100 checked
+            </span>
+          )}
+          {pillar.snapshot && (
+            <span className="pill pill-snapshot">snapshot, not tracked</span>
+          )}
+        </div>
       </div>
       {pillar.finding && <p style={{ fontSize: 14, margin: '6px 0' }}>{pillar.finding}</p>}
       {pillar.recommendation && (
