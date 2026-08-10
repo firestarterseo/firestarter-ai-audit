@@ -11,14 +11,27 @@ export default function RunAuditButton({ clientId }) {
   async function onClick() {
     setRunning(true)
     setError(null)
+    // Belt-and-suspenders on top of the server's own maxDuration=60: if the
+    // response somehow never comes back (dropped connection, cold-start
+    // stacking with the live Cloro calls, etc.), don't leave the button
+    // spinning forever with no explanation. The audit may still finish and
+    // write to the DB even if this specific request times out client-side
+    // -- refreshing will show it if so.
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 75000)
     try {
-      const res = await fetch(`/api/clients/${clientId}/audit`, { method: 'POST' })
+      const res = await fetch(`/api/clients/${clientId}/audit`, { method: 'POST', signal: controller.signal })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Audit failed')
       router.refresh()
     } catch (err) {
-      setError(err.message)
+      if (err.name === 'AbortError') {
+        setError('This is taking longer than expected (75s+). The audit may still finish in the background -- try refreshing the page in a bit to check.')
+      } else {
+        setError(err.message)
+      }
     } finally {
+      clearTimeout(timeout)
       setRunning(false)
     }
   }
