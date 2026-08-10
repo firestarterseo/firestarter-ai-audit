@@ -1,0 +1,42 @@
+{
+  "_note": "REAL live capture, run 2026-08-10 through Cloro's own Playground/Try It panel (dashboard.cloro.dev -> docs -> Extract Perplexity -> Try it), using the firestarter-ai-audit Cloro API key created 2026-08-07. Prompt is the exact auto-generated prompt business-profile.js produces from Denver Tax Advisor's real captured schema. Not synthetic -- this is genuine Perplexity output via Cloro's POST /v1/monitor/perplexity sync endpoint. Confirms Perplexity follows the same 'default' response shape already fixed for chatgpt (text + sources + citationPills), with extra Perplexity-specific fields (shopping_cards, related_queries, search_model_queries) that the checker correctly ignores -- no new shape bug found for this engine.",
+  "request": {
+    "prompt": "best accounting and tax service in Denver, CO",
+    "country": "US"
+  },
+  "response": {
+    "success": true,
+    "result": {
+      "text": "Top options in Denver include Dimov Tax, Haynie & Company, and Eide Bailly, which offer specialized tax planning/prep and accounting services.[1][2][3]\n\n- Dimov Tax: top-rated tax and bookkeeping for small businesses in Denver.[1]\n- Haynie & Company: expert tax planning and preparation near Denver.[2]\n- Eide Bailly: Denver-based advisory firm with local insight and national reach.[3]\n\nOther notable sources listing Denver tax/accounting firms include Zamp's Denver firm roundup and Clutch reviews.[4][5]",
+      "sources": [
+        { "position": 1, "label": "Best CPA in Denver - Trusted Certified Public Accountants", "url": "https://dimovtax.com/locations/tax-accountant-denver/", "description": "Dimov Tax is a top-rated Tax and Bookkeeping firm in Denver, CO specializing in small business tax preparation, tax planning, and accounting services." },
+        { "position": 2, "label": "Expert Tax Planning & Preparation in Denver", "url": "https://www.hayniecpas.com/denver-colorado/tax-services/", "description": "Hire a tax professional, like those at Haynie & Company, for superior tax planning and preparation services near Denver, CO." },
+        { "position": 3, "label": "Denver Accounting, Tax & Advisory Services", "url": "https://www.eidebailly.com/locations/denver", "description": "Trusted business advisors in Denver, CO. Eide Bailly combines national expertise with local insight." },
+        { "position": 4, "label": "Best Accounting Firms in Denver 2026 - Zamp", "url": "https://zamp.com/blog/accounting-firms-denver", "description": "Finding the right accounting firm in Denver can transform how your business handles everything from tax compliance to strategic financial planning." },
+        { "position": 5, "label": "Top Tax Preparation Services in Denver - Sep 2025 Rankings - Clutch", "url": "https://clutch.co/accounting/tax-payroll/denver", "description": "Detailed client reviews of the leading Denver tax preparation services." },
+        { "position": 6, "label": "15 Best Denver, CO Tax Services - Expertise.com", "url": "https://www.expertise.com/finance/tax-services-cpa/colorado/denver", "description": "Drexler & Associates is one of the 14 Best Tax Services in Denver, CO." },
+        { "position": 7, "label": "Top Accounting Firms in Denver - Jul 2026 Rankings | Clutch.co", "url": "https://clutch.co/accounting/denver", "description": "Recommended Accounting companies in Denver include George Dimov, CPA, Appletree Business Services, Sound Advice Bookkeeping." },
+        { "position": 8, "label": "Best Denver Accounting Company Rankings", "url": "https://www.designrush.com/agency/accounting/colorado/denver", "description": "Here are the top accounting firms in Denver that provide services from payroll to bookkeeping, taxes, etc." },
+        { "position": 9, "label": "16 Best Denver, CO Accountants", "url": "https://www.expertise.com/finance/accountant-cpa/colorado/denver", "description": "Drexler & Associates is one of the 16 Best Accountants in Denver, CO." },
+        { "position": 10, "label": "5 Best Accountants in Denver: Top Firms for Tax Help [2026]", "url": "https://www.uncoverdenver.com/best-accountants-denver/", "description": "Here are our top accountants in Denver reviewed." }
+      ],
+      "citationPills": [
+        { "label": "Best CPA in Denver - Trusted Certified Public Accountants", "citationPillId": 1, "url": "https://dimovtax.com/locations/tax-accountant-denver/", "domain": "dimovtax.com", "position": 1 },
+        { "label": "Expert Tax Planning & Preparation in Denver", "citationPillId": 1, "url": "https://www.hayniecpas.com/denver-colorado/tax-services/", "domain": "hayniecpas.com", "position": 2 },
+        { "label": "Denver Accounting, Tax & Advisory Services", "citationPillId": 1, "url": "https://www.eidebailly.com/locations/denver", "domain": "eidebailly.com", "position": 3 },
+        { "label": "Best Accounting Firms in Denver 2026 - Zamp", "citationPillId": 5, "url": "https://zamp.com/blog/accounting-firms-denver", "domain": "zamp.com", "position": 4 },
+        { "label": "Top Tax Preparation Services in Denver - Sep 2025 Rankings - Clutch", "citationPillId": 5, "url": "https://clutch.co/accounting/tax-payroll/denver", "domain": "clutch.co", "position": 5 }
+      ],
+      "shopping_cards": [],
+      "related_queries": [
+        "best accounting firm for small businesses in Denver",
+        "Denver tax preparation services for individuals 2026",
+        "Top-rated CPA firms in Denver CO for corporate tax",
+        "Review of Denver accounting firms with fractional CFO services",
+        "Denver tax strategies for startups and new businesses"
+      ],
+      "search_model_queries": ["best accounting and tax service in Denver, CO"]
+    }
+  },
+  "real_world_finding": "Denver Tax Advisor does not appear anywhere in this real Perplexity response -- not in text, sources, or citationPills. Three competitors named directly (Dimov Tax, Haynie & Company, Eide Bailly), several more in secondary sources. This is the fourth of five engines confirming total absence for this business on this generic query."
+}

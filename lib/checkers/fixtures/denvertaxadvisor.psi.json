@@ -1,0 +1,16 @@
+{
+  "_note": "Real PageSpeed Insights v5 response for https://denvertaxadvisor.com/ (mobile), captured live during this session using the newly-created Firestarter API key. Trimmed to the fields the checker actually reads — the full response was ~580KB.",
+  "lighthouseResult": {
+    "categories": {
+      "performance": { "score": 0.45 },
+      "seo": { "score": 0.85 },
+      "accessibility": { "score": 0.70 },
+      "best-practices": { "score": 0.96 }
+    },
+    "audits": {
+      "largest-contentful-paint": { "displayValue": "17.4 s" },
+      "cumulative-layout-shift": { "displayValue": "0.051" },
+      "total-blocking-time": { "displayValue": "580 ms" }
+    }
+  }
+}

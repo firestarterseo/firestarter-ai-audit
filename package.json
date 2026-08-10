@@ -1,0 +1,18 @@
+{
+  "name": "firestarter-ai-audit",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Internal Grader dashboard for Firestarter's 5-pillar AI audit tool. Stands alone from sourcehq -- own DB, own Cloro key, own deployment.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test:checkers": "for f in lib/checkers/scripts/*.js; do echo \"=== $f ===\"; node \"$f\" || exit 1; done"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "next": "^16.3.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  }
+}

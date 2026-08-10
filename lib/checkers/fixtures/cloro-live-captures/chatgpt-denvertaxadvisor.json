@@ -1,0 +1,39 @@
+{
+  "_note": "REAL live capture, run 2026-08-10 through Cloro's own Playground/Try It panel (dashboard.cloro.dev -> docs -> Extract ChatGPT -> Try it), using the firestarter-ai-audit Cloro API key created 2026-08-07. Prompt is the exact auto-generated prompt business-profile.js produces from Denver Tax Advisor's real captured schema. Not synthetic -- this is genuine ChatGPT output via Cloro's POST /v1/monitor/chatgpt sync endpoint.",
+  "request": {
+    "prompt": "best accounting and tax service in Denver, CO",
+    "country": "US"
+  },
+  "response": {
+    "success": true,
+    "result": {
+      "model": "gpt-5-6",
+      "text": "\nIf you're looking for the best accounting + tax service in Denver, I'd shortlist these based on current local ratings, services, and how well they fit different needs:\n🏆 My top picks\n\n\nWiggs CPA Tax and Accounting — Best for small businesses\n\n\n5.0★ with 164 reviews\n\n\nBusiness taxes, bookkeeping, payroll, and year-round tax planning\n\n\nParticularly geared toward small businesses and self-employed professionals.\n\n\nMy pick if you want one firm to handle both accounting and taxes.\n\n\n\n\nEMC Accounting Group — Best for virtual/full-service accounting\n\n\n5.0★ with 89 reviews\n\n\nTax planning, bookkeeping, tax resolution, and QuickBooks support\n\n\nStrong option if you prefer doing most things remotely.\n\n\n\n\nAbacus Accounting Center, LLC - CPA Firm — Best established full-service option\n\n\n4.9★ with 54 reviews\n\n\nTax preparation/planning, bookkeeping, payroll, outsourced accounting, and business advisory\n\n\nParticularly suitable for small-to-midsize businesses and professional practices.\n\n\n\n\nBlue Bear Tax Solutions — Best for complicated tax problems\n\n\n4.8★ with 221 reviews\n\n\nTax preparation, planning, IRS issues, audits, appeals, and tax resolution\n\n\nWorth considering if you have back taxes, IRS notices, or a complicated return.\n\n\n\n\nEPIC TAXES — Best highly rated Denver tax-focused option\n\n\n5.0★ with 325 reviews\n\n\nPersonal and business taxes, bookkeeping, and sales-tax support.\n\n\n\n\nIf you're a business owner\nI'd narrow it to Wiggs CPA, EMC Accounting Group, or Abacus. For a business, I would prioritize a firm that does year-round tax planning + bookkeeping/accounting, rather than one that only prepares your tax return.",
+      "sources": [
+        { "position": 1, "label": "Denver CPA | Certified Public Accountant & Bookkeeping | Wiggs CPA", "url": "https://www.wiggscpa.com/?utm_source=chatgpt.com", "description": "", "footnote": false },
+        { "position": 2, "label": "When to Hire a CPA for Your Small Business", "url": "https://www.wsj.com/buyside/personal-finance/financial-advisors/cpa-small-business?utm_source=chatgpt.com", "description": "This article explains the importance of hiring a Certified Public Accountant (CPA) for small-business owners and when it might be necessary.", "footnote": false, "datePublished": "Aug 05, 2026" },
+        { "position": 3, "label": "The Tax Trap Snares Many Business Owners: A Financial Pro's Guide to 11 Strategies You May Be Missing", "url": "https://www.kiplinger.com/business/small-business/tax-trap-snares-many-business-owners-strategies-you-may-be-missing?utm_source=chatgpt.com", "description": "Many business owners experience a disconnect between their growing businesses and stagnant personal wealth, primarily due to poor tax planning.", "footnote": false },
+        { "position": 4, "label": "Denver Tax & Accounting Professionals | Denver, Colorado Accounting", "url": "https://www.twohillscpas.com/?utm_source=chatgpt.com", "description": "(303) 223-2575 Two Hills CPA Firm", "footnote": true }
+      ],
+      "entities": [
+        { "type": "turn0business1", "name": "Wiggs CPA Tax and Accounting" },
+        { "type": "turn0business0", "name": "EMC Accounting Group" },
+        { "type": "turn0business10", "name": "Abacus Accounting Center, LLC - CPA Firm" },
+        { "type": "turn0business4", "name": "Blue Bear Tax Solutions" },
+        { "type": "turn0business6", "name": "EPIC TAXES" }
+      ],
+      "map": [
+        { "id": "ChIJsd6A6KKoKQ4Ric8gij-H_5A", "provider": "b3", "name": "Wiggs CPA Tax and Accounting", "position": 1, "rating": 5, "reviewCount": 164, "categories": ["Certified public accountant", "Service establishment"], "phone": "+1 773-800-8950", "websiteUrl": "https://www.wiggscpa.com/" },
+        { "id": "ChIJ1XRQf6Z5bIcRo-0I2E3SieI", "provider": "b3", "name": "EMC Accounting Group", "position": 2, "address": "1001 Bannock St #488, Denver, CO 80204, United States", "rating": 5, "reviewCount": 89, "categories": ["Accountant", "Accounting firm", "Tax preparation"], "phone": "+1 720-740-3040", "websiteUrl": "https://www.emcaccountinggroup.com/" },
+        { "id": "ChIJO9RAGyeBa4cRTrOzp7WXKpM", "provider": "b3", "name": "Abacus Accounting Center, LLC - CPA Firm", "position": 3, "address": "7800 E Dorado Pl #110, Greenwood Village, CO 80111, United States", "rating": 4.9, "reviewCount": 54, "phone": "+1 303-275-8910", "websiteUrl": "http://www.abacusaccountingcenter.com/" },
+        { "id": "ChIJj9vKTzVubIcRycYUWwRDOMY", "provider": "b3", "name": "Blue Bear Tax Solutions", "position": 4, "address": "181 E 56th Ave Ste 200, Denver, CO 80216, United States", "rating": 4.8, "reviewCount": 221, "phone": "+1 877-239-4668", "websiteUrl": "http://www.bluebeartax.com/" },
+        { "id": "ChIJwa7IpGF7bIcR6dzyP2ZNmHE", "provider": "b3", "name": "EPIC TAXES", "position": 5, "address": "8246 E Northfield Blvd SUITE 2520, Denver, CO 80238, United States", "rating": 5, "reviewCount": 325, "phone": "+1 720-610-7000", "websiteUrl": "https://solo.to/epictaxes" }
+      ],
+      "citationPills": [
+        { "url": "https://www.wiggscpa.com/?utm_source=chatgpt.com", "label": "Denver CPA | Certified Public Accountant & Bookkeeping | Wiggs CPA", "domain": "wiggscpa.com", "type": "groupedWebpage", "citationPillId": 0, "position": 1 },
+        { "url": "https://www.wsj.com/buyside/personal-finance/financial-advisors/cpa-small-business?utm_source=chatgpt.com", "label": "When to Hire a CPA for Your Small Business", "domain": "wsj.com", "type": "groupedWebpage", "citationPillId": 1, "position": 2 }
+      ]
+    }
+  },
+  "real_world_finding": "Denver Tax Advisor (the actual business this prompt was generated for) does NOT appear anywhere in this real response -- not in text, not in sources, not in entities, not in the map/local-pack listing. Five competitors do. This is a genuine, unprompted result: it means the mention detection logic has a real true-negative case to validate against, not just the negative_case synthetic fixture."
+}

@@ -1,0 +1,43 @@
+{
+  "_note": "REAL live capture, run 2026-08-10 through Cloro's own Playground/Try It panel (dashboard.cloro.dev -> docs -> Extract Microsoft Copilot -> Try it), using the firestarter-ai-audit Cloro API key created 2026-08-07. Prompt is the exact auto-generated prompt business-profile.js produces from Denver Tax Advisor's real captured schema. Not synthetic -- this is genuine Copilot output via Cloro's POST /v1/monitor/copilot sync endpoint. Confirms Copilot follows the same 'default' response shape already fixed for chatgpt (text + sources + citationPills), with extra Copilot-specific fields (map, searchQueries) that the checker correctly ignores for mention/citation purposes -- no new shape bug found for this engine.",
+  "request": {
+    "prompt": "best accounting and tax service in Denver, CO",
+    "country": "US"
+  },
+  "response": {
+    "success": true,
+    "result": {
+      "text": "The best-rated accounting and tax services in Denver right now include highly trusted local firms such as Tax Services Center, LLC (5.0 stars, 432 reviews) and EMC Accounting Group (5.0 stars, 107 reviews), alongside nationally recognized firms like Bennett Thrasher and Forvis Mazars that bring deep expertise in complex tax planning. These options cover both individual tax preparation and advanced business advisory needs.\n\nTop Local Accounting & Tax Services in Denver:\n- Tax Services Center, LLC -- 3008 W 23rd Ave, Denver, CO -- 5.0 (432 reviews) -- Tax prep, notary, translation\n- Blue Bear Tax Solutions -- 181 E 56th Ave Ste 200 -- 4.8 (221 reviews) -- Led by a former IRS agent\n- Dickmann Tax Group -- 1001 Bannock St Ste 480 -- 4.9 (134 reviews) -- Tax debt resolution, bookkeeping\n- EMC Accounting Group -- 1001 Bannock St #726 -- 5.0 (107 reviews) -- Accounting, tax prep, consulting\n- Highland Tax Group, Inc. -- 2956 Wyandot St -- 5.0 (108 reviews) -- IRS audit representation, tax resolution\n\nNational & Regional Firms with Denver Offices: Bennett Thrasher, Forvis Mazars, TaxOps LLC, Dark Horse CPAs.",
+      "sources": [
+        { "position": 1, "label": "Tax Services Center, LLC", "url": "https://www.taxservicescenter.net/" },
+        { "position": 2, "label": "EMC Accounting Group", "url": "https://www.emcaccountinggroup.com/" },
+        { "position": 3, "label": "Best CPAs in Denver, CO (2026) | Top CPAs", "url": "https://cparanked.com/best-of/best-cpas-in-denver-co-2026" },
+        { "position": 4, "label": "Best Accounting Firms in Denver 2026", "url": "https://zamp.com/blog/accounting-firms-denver" },
+        { "position": 5, "label": "Top 10 Denver Accounting Services for 2026 - Accounting Capital", "url": "https://www.accountingcapital.com/top/top-10-denver-accounting-services-for-2026/" },
+        { "position": 6, "label": "Blue Bear Tax Solutions", "url": "http://www.bluebeartax.com/" },
+        { "position": 7, "label": "Dickmann Tax Group", "url": "https://dickmanntaxgroup.com/" },
+        { "position": 8, "label": "Denver Tax Group, LLC", "url": "https://denvertaxgroup.com/" },
+        { "position": 9, "label": "ATAX HIGHLANDS CO", "url": "http://www.atax.com/highlandsco" },
+        { "position": 10, "label": "Advanced Tax Solutions, CPA PC", "url": "https://advancedtaxsolutions.com/" },
+        { "position": 11, "label": "Highland Tax Group, Inc.", "url": "http://www.highlandtaxresolution.com/" }
+      ],
+      "citationPills": [
+        { "label": "Tax Services Center, LLC", "citationPillId": 1, "url": "https://www.taxservicescenter.net/", "domain": "taxservicescenter.net", "position": 1 },
+        { "label": "EMC Accounting Group", "citationPillId": 1, "url": "https://www.emcaccountinggroup.com/", "domain": "emcaccountinggroup.com", "position": 2 },
+        { "label": "Best CPAs in Denver, CO (2026) | Top CPAs", "citationPillId": 1, "url": "https://cparanked.com/best-of/best-cpas-in-denver-co-2026", "domain": "cparanked.com", "position": 3 },
+        { "label": "Blue Bear Tax Solutions", "citationPillId": 2, "url": "http://www.bluebeartax.com/", "domain": "bluebeartax.com", "position": 6 },
+        { "label": "Dickmann Tax Group", "citationPillId": 2, "url": "https://dickmanntaxgroup.com/", "domain": "dickmanntaxgroup.com", "position": 7 },
+        { "label": "Highland Tax Group, Inc.", "citationPillId": 2, "url": "http://www.highlandtaxresolution.com/", "domain": "highlandtaxresolution.com", "position": 11 }
+      ],
+      "map": [
+        { "name": "Tax Services Center, LLC", "position": 1, "location": { "address": "3008 W 23rd Ave, Denver, CO 80211, United States" }, "url": "https://www.taxservicescenter.net/", "reviews": [{ "count": 432, "rating": 5, "providerName": "Google" }], "category": "Tax preparation service" },
+        { "name": "Blue Bear Tax Solutions", "position": 2, "location": { "address": "181 E 56th Ave Ste 200, Denver, CO 80216, United States" }, "url": "http://www.bluebeartax.com/", "reviews": [{ "count": 221, "rating": 4.8, "providerName": "Google" }], "category": "Tax preparation service" },
+        { "name": "Dickmann Tax Group", "position": 3, "location": { "address": "1001 Bannock St Ste 480, Denver, CO 80204, United States" }, "url": "https://dickmanntaxgroup.com/", "reviews": [{ "count": 134, "rating": 4.9, "providerName": "Google" }], "category": "Tax attorney" },
+        { "name": "EMC Accounting Group", "position": 7, "location": { "address": "1001 Bannock St #726, Denver, CO 80204, United States" }, "url": "https://www.emcaccountinggroup.com/", "reviews": [{ "count": 107, "rating": 5, "providerName": "Google" }], "category": "Accountant" },
+        { "name": "Highland Tax Group, Inc.", "position": 8, "location": { "address": "2956 Wyandot St, Denver, CO 80211, United States" }, "url": "http://www.highlandtaxresolution.com/", "reviews": [{ "count": 108, "rating": 5, "providerName": "Google" }], "category": "Tax consultant" }
+      ],
+      "searchQueries": ["best accounting and tax services Denver CO", "accounting and tax services in Denver, CO"]
+    }
+  },
+  "real_world_finding": "Denver Tax Advisor does not appear anywhere in this real Copilot response -- not in text, sources, citationPills, or the map/local-pack listing. Five+ competitors named instead (Tax Services Center, Blue Bear Tax Solutions, Dickmann Tax Group, EMC Accounting Group, Highland Tax Group, plus national firms Bennett Thrasher and Forvis Mazars). This is the fifth and final engine confirming total absence for this business on this generic query -- a clean 5-for-5 across chatgpt, google, gemini, perplexity, and copilot."
+}

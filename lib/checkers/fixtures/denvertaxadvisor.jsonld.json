@@ -1,0 +1,115 @@
+[
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebPage",
+        "@id": "https://denvertaxadvisor.com/",
+        "url": "https://denvertaxadvisor.com/",
+        "name": "Tax Preparation Denver, Tax Prep Denver - Denver Tax Advisor",
+        "isPartOf": { "@id": "https://denvertaxadvisor.com/#website" },
+        "about": { "@id": "https://denvertaxadvisor.com/#organization" },
+        "datePublished": "2019-09-06T10:26:07+00:00",
+        "dateModified": "2021-10-28T19:28:16+00:00",
+        "description": "Denver Tax Advisor is the premier Tax Preparation and Advisory company in Denver. Contact our experts today to develop the best tax strategy possible.",
+        "breadcrumb": { "@id": "https://denvertaxadvisor.com/#breadcrumb" },
+        "inLanguage": "en-US",
+        "potentialAction": [
+          { "@type": "ReadAction", "target": ["https://denvertaxadvisor.com/"] }
+        ]
+      },
+      {
+        "@type": "BreadcrumbList",
+        "@id": "https://denvertaxadvisor.com/#breadcrumb",
+        "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Home" }
+        ]
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://denvertaxadvisor.com/#website",
+        "url": "https://denvertaxadvisor.com/",
+        "name": "Denver Tax Advisor",
+        "description": "Your Trusted Denver Tax Planner",
+        "publisher": { "@id": "https://denvertaxadvisor.com/#organization" },
+        "potentialAction": [
+          {
+            "@type": "SearchAction",
+            "target": {
+              "@type": "EntryPoint",
+              "urlTemplate": "https://denvertaxadvisor.com/?s={search_term_string}"
+            },
+            "query-input": {
+              "@type": "PropertyValueSpecification",
+              "valueRequired": true,
+              "valueName": "search_term_string"
+            }
+          }
+        ],
+        "inLanguage": "en-US"
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://denvertaxadvisor.com/#organization",
+        "name": "Denver Tax Advisor",
+        "url": "https://denvertaxadvisor.com/",
+        "logo": {
+          "@type": "ImageObject",
+          "inLanguage": "en-US",
+          "@id": "https://denvertaxadvisor.com/#/schema/logo/image/",
+          "url": "https://denvertaxadvisor.com/wp-content/uploads/2018/10/logo-2-1.png",
+          "contentUrl": "https://denvertaxadvisor.com/wp-content/uploads/2018/10/logo-2-1.png",
+          "width": 181,
+          "height": 41,
+          "caption": "Denver Tax Advisor"
+        },
+        "image": { "@id": "https://denvertaxadvisor.com/#/schema/logo/image/" }
+      }
+    ]
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "AccountingService",
+    "name": "Denver Tax Advisor",
+    "url": "https://denvertaxadvisor.com/",
+    "telephone": "+1-720-381-8331",
+    "email": "admin@denvertaxadvisor.com",
+    "description": "Denver Tax Advisor is a Denver, CO tax preparation and advisory firm serving individuals and business owners, specializing in personal and business tax returns, tax liability reduction, and IRS problem resolution.",
+    "address": {
+      "@type": "PostalAddress",
+      "streetAddress": "55 Madison St, Ste 540",
+      "addressLocality": "Denver",
+      "addressRegion": "CO",
+      "postalCode": "80206",
+      "addressCountry": "US"
+    },
+    "openingHoursSpecification": {
+      "@type": "OpeningHoursSpecification",
+      "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+      "opens": "09:00",
+      "closes": "17:00"
+    },
+    "areaServed": { "@type": "City", "name": "Denver, CO" },
+    "priceRange": "$",
+    "employee": [
+      { "@type": "Person", "name": "Jason Billingsley", "jobTitle": "Principal Tax Accountant & Investment Manager", "hasCredential": "CFA, Enrolled Agent" },
+      { "@type": "Person", "name": "Minesh Amin", "jobTitle": "Senior Tax Accountant", "hasCredential": "Enrolled Agent" },
+      { "@type": "Person", "name": "Jake Johnson", "jobTitle": "Tax Professional", "hasCredential": "J.D., Washburn University School of Law" },
+      { "@type": "Person", "name": "Cathy Mueller", "jobTitle": "Tax Accountant", "hasCredential": "CPA" }
+    ],
+    "hasOfferCatalog": {
+      "@type": "OfferCatalog",
+      "name": "Tax Services",
+      "itemListElement": [
+        { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Personal Tax Preparation" } },
+        { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Business Tax Preparation" } },
+        { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Business Formation Tax Planning" } },
+        { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Tax Liability Reduction Strategy" } },
+        { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Rental Property Tax Services" } },
+        { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Trust & Estate Tax Preparation" } },
+        { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Stock Option & Equity Incentive Tax Planning" } },
+        { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "IRS Problem Resolution" } }
+      ]
+    }
+  }
+]

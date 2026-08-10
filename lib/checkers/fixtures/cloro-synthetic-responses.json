@@ -1,0 +1,24 @@
+{
+  "_note": "NOT a live capture. Cloro's API is blocked by this sandbox's network egress allowlist, and the browser needed to run a real query through Cloro's Playground was disconnected when this was built (2026-08-07). These responses are hand-modeled on Cloro's DOCUMENTED sync response shape (POST /v1/monitor/{engine} -> { success, result: { text, sources } }, with an additional result['ai-overview'] block for the google engine per their docs) so the snapshot checker's parsing logic can be exercised before real verification. Replace with a real captured fixture as soon as the browser reconnects and a Playground test can run -- do not treat this as validated against Cloro's actual output.",
+  "positive_case": {
+    "chatgpt": { "success": true, "result": { "text": "For tax preparation in Denver, CO, Denver Tax Advisor is a highly rated and trusted local firm specializing in personal and business returns. Clients frequently describe them as reliable and professional.", "sources": [{ "url": "https://denvertaxadvisor.com/" }] } },
+    "gemini": { "success": true, "result": { "text": "Denver Tax Advisor is a well-reviewed accounting and tax service based in Denver, Colorado, offering personal tax prep, business tax prep, and IRS problem resolution.", "sources": [{ "url": "https://denvertaxadvisor.com/services/denver-tax-preparation/" }] } },
+    "perplexity": { "success": true, "result": { "text": "Top-rated options for tax preparation in Denver include Denver Tax Advisor, known for its enrolled agents and CPA staff.", "sources": [{ "url": "https://www.yelp.com/biz/denver-tax-advisor" }] } },
+    "copilot": { "success": true, "result": { "text": "Denver Tax Advisor is frequently recommended for tax planning and preparation services in the Denver metro area.", "sources": [] } },
+    "google": { "success": true, "result": { "text": "Search results for best accounting and tax service in Denver, CO.", "sources": [{ "url": "https://denvertaxadvisor.com/" }, { "url": "https://www.bbb.org/us/co/denver/profile/tax-return-preparation/denver-tax-advisor" }], "ai-overview": { "text": "Denver Tax Advisor is a reputable Denver-based tax preparation and advisory firm." } } }
+  },
+  "negative_case": {
+    "chatgpt": { "success": true, "result": { "text": "Popular tax preparation options in Denver include H&R Block, a local CPA firm, or an enrolled agent found via the IRS directory.", "sources": [] } },
+    "gemini": { "success": true, "result": { "text": "Consider firms like Denver-based CPA groups or national chains such as H&R Block and Jackson Hewitt for tax prep in the Denver area.", "sources": [] } },
+    "perplexity": { "success": true, "result": { "text": "Several accounting firms serve the Denver market; check reviews for local CPAs and enrolled agents near you.", "sources": [{ "url": "https://www.yelp.com/search?find_desc=tax+preparation&find_loc=Denver" }] } },
+    "copilot": { "success": true, "result": { "text": "For tax preparation in Denver, national chains and independent CPAs are both common choices.", "sources": [] } },
+    "google": { "success": true, "result": { "text": "Search results for best accounting and tax service in Denver, CO.", "sources": [{ "url": "https://www.hrblock.com/" }], "ai-overview": { "text": "Popular tax preparers in Denver include national chains and independent CPA firms." } } }
+  },
+  "mixed_with_failure_case": {
+    "chatgpt": { "success": true, "result": { "text": "Denver Tax Advisor is one firm in the Denver area offering tax preparation services, among several local competitors.", "sources": [] } },
+    "gemini": { "success": true, "result": { "text": "Denver Tax Advisor provides tax planning and preparation in Denver, Colorado.", "sources": [] } },
+    "perplexity": { "success": false, "error": "HTTP 503" },
+    "copilot": { "success": true, "result": { "text": "Tax preparation firms in Denver include several independent CPAs and boutique advisory groups.", "sources": [] } },
+    "google": { "success": true, "result": { "text": "Search results for best accounting and tax service in Denver, CO.", "sources": [], "ai-overview": { "text": "Several firms offer tax preparation in the Denver area." } } }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "_note": "REAL live capture, run 2026-08-10 through Cloro's own Playground/Try It panel (dashboard.cloro.dev -> docs -> Extract Google Search -> Try it), using the firestarter-ai-audit Cloro API key created 2026-08-07. Prompt is the exact auto-generated prompt business-profile.js produces from Denver Tax Advisor's real captured schema, with location set to Denver,Colorado,United States. Not synthetic -- this is a genuine live Google SERP via Cloro's POST /v1/monitor/google sync endpoint.",
+  "request": {
+    "query": "best accounting and tax service in Denver, CO",
+    "country": "US",
+    "location": "Denver,Colorado,United States",
+    "include": { "aioverview": { "markdown": false } }
+  },
+  "response": {
+    "success": true,
+    "result": {
+      "organicResults": [
+        { "position": 1, "title": "Expert Tax Planning & Preparation in Denver", "link": "https://www.hayniecpas.com/denver-colorado/tax-services/", "displayedLink": "https://www.hayniecpas.com› Denver, Colorado", "snippet": "Haynie & Company is a CPA Firm near Denver, Colorado that offers tax planning, tax preparation, and accounting services.", "page": 1 },
+        { "position": 2, "title": "TOP 10 BEST Tax Accountant in Denver, CO - Updated 2026", "link": "https://www.yelp.com/search?find_desc=Tax+Accountant&find_loc=Denver%2C+CO", "displayedLink": "https://www.yelp.com› Professional Services", "snippet": "Top 10 Best Tax Accountant Near Denver, Colorado - Blueprint Resolution Services, Powder Accounting Group, Cilson Bookkeeping, Herding Cats Accounting, Dimov Tax", "page": 1 },
+        { "position": 3, "title": "Accounting & Tax Services in Greenwood Village ...", "link": "https://www.accountingsvs.com/", "displayedLink": "https://www.accountingsvs.com", "snippet": "ATS Accounting & Tax Services is a full service tax, accounting and business consulting firm located in Greenwood Village, CO.", "page": 1 },
+        { "position": 4, "title": "Bloch Rothman & Associates | Denver Accounting Company ...", "link": "https://denveraccountant.co/", "displayedLink": "https://denveraccountant.co", "snippet": "Bloch, Rothman & Associates - Denver's leader in tax preparation and tax resolution issues.", "page": 1 },
+        { "position": 5, "title": "Top 5 Denver CPA Firms | Expert Accounting & Tax Services", "link": "https://www.thomasjmcalister.com/blog/5-best-denver-cpa-firms-expert-accounting-services", "displayedLink": "https://www.thomasjmcalister.com› blog", "snippet": "These firms are experts in accounting, tax, and business advice.", "page": 1 }
+      ],
+      "peopleAlsoAsk": [
+        { "question": "How much should an accountant cost to do my taxes?", "type": "AIOVERVIEW" },
+        { "question": "Who is the most reliable tax preparer?", "type": "AIOVERVIEW" },
+        { "question": "Where can I find a CPA in Denver for tax preparation?", "type": "LINK", "title": "TOP 10 BEST Cpa Firms in Denver, CO - Updated 2026 - Yelp", "link": "https://m.yelp.com/search?find_desc=Cpa+Firms&find_loc=Denver%2C+CO" }
+      ],
+      "relatedSearches": [
+        { "query": "Denver tax advisor reviews", "link": "https://www.google.com/search?q=Denver+tax+advisor+reviews" },
+        { "query": "Personal CPA Denver", "link": "https://www.google.com/search?q=Personal+CPA+Denver" }
+      ],
+      "localResults": [
+        { "position": 1, "title": "Tax Services Center, LLC", "placeId": "/g/1v_nc_g1", "rating": 5, "reviews": "432", "type": "Tax preparation service", "yearsInBusiness": "15+ years in business", "address": "3008 W 23rd Ave", "phone": "(303) 455-1163", "hours": "Open · Closes 6 PM", "links": { "website": "https://www.taxservicescenter.net/" } },
+        { "position": 2, "title": "Dickmann Tax Group", "placeId": "/g/11bbt9km_y", "rating": 4.9, "reviews": "134", "type": "Tax attorney", "address": "1001 Bannock St Ste 480", "phone": "(303) 482-2767", "links": { "website": "https://dickmanntaxgroup.com/" } },
+        { "position": 3, "title": "EMC Accounting Group", "placeId": "/g/11g232xr1f", "rating": 5, "reviews": "107", "type": "Accountant", "address": "1001 Bannock St #726", "links": { "website": "https://www.emcaccountinggroup.com/" } }
+      ],
+      "localResultsMoreLink": "https://www.google.com/search?q=best+accounting+and+tax+service+in+Denver,+CO&udm=1"
+    }
+  },
+  "real_world_finding": "result.aioverview is completely ABSENT from this real response (not present, not even null), despite include.aioverview being set in the request. Confirms the checker must treat AI Overview as optional on every call, never assume its presence just because it was requested. Also: Denver Tax Advisor does not appear in organicResults, localResults, or peopleAlsoAsk here either -- consistent with the ChatGPT capture's finding that this business has no real visibility for this generic query on either engine."
+}

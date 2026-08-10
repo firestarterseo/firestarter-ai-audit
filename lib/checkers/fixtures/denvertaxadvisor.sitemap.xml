@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset
+      xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9
+            http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
+<!-- created with Free Online Sitemap Generator www.xml-sitemaps.com -->
+<!-- NOTE: live sitemap has 30 <url> entries (confirmed via live fetch, len=5263 chars);
+     this fixture reproduces the captured excerpt (first 3 real entries) plus enough
+     synthetic entries to reach 30, purely so the parser's urlCount logic can be tested
+     against a realistic count without re-fetching the full live document. -->
+
+<url>
+  <loc>https://denvertaxadvisor.com/</loc>
+  <lastmod>2020-03-09T11:05:46+00:00</lastmod>
+  <priority>1.00</priority>
+</url>
+<url>
+  <loc>https://denvertaxadvisor.com/services/</loc>
+  <lastmod>2020-03-09T11:05:46+00:00</lastmod>
+  <priority>0.80</priority>
+</url>
+<url>
+  <loc>https://denvertaxadvisor.com/services/denver-tax-preparation/</loc>
+  <lastmod>2020-03-09T11:05:46+00:00</lastmod>
+  <priority>0.80</priority>
+</url>
+<url><loc>https://denvertaxadvisor.com/services/denver-personal-taxes/</loc></url>
+<url><loc>https://denvertaxadvisor.com/services/business-taxes/</loc></url>
+<url><loc>https://denvertaxadvisor.com/services/denver-small-business-taxes/</loc></url>
+<url><loc>https://denvertaxadvisor.com/services/denver-tax-liability-reduction/</loc></url>
+<url><loc>https://denvertaxadvisor.com/services/rental-property-taxes/</loc></url>
+<url><loc>https://denvertaxadvisor.com/services/denver-trusts-estate-taxes/</loc></url>
+<url><loc>https://denvertaxadvisor.com/services/services-incentive-employee-taxes/</loc></url>
+<url><loc>https://denvertaxadvisor.com/services/irs-problem-solving/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-13/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-14/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-15/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-16/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-17/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-18/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-19/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-20/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-21/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-22/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-23/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-24/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-25/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-26/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-27/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-28/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-29/</loc></url>
+<url><loc>https://denvertaxadvisor.com/tax-resources/page-30/</loc></url>
+</urlset>
