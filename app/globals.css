@@ -1,0 +1,303 @@
+/* Firestarter brand tokens -- sourced from 2026 Firestarter Brand Guidelines. */
+:root {
+  --font-display: 'Fjalla One', sans-serif;
+  --font-body: 'Poppins', sans-serif;
+
+  --orange: #f27f30;
+  --red: #ef4b45;
+  --grad: linear-gradient(135deg, #f27f30 0%, #ef4b45 100%);
+  --grad-v: linear-gradient(180deg, #f27f30 0%, #ef4b45 100%);
+  --text: #1d1525;
+  --muted: rgba(29, 21, 37, 0.6);
+  --muted-2: rgba(29, 21, 37, 0.4);
+  --border: rgba(29, 21, 37, 0.1);
+  --border-strong: rgba(29, 21, 37, 0.16);
+  --bg-alt: #fafafa;
+  --white: #ffffff;
+
+  /* Semantic grade colors -- deliberately distinct from brand accent colors
+     so a grade badge is never confused with a brand CTA. */
+  --grade-a: #16a34a;
+  --grade-b: #65a30d;
+  --grade-c: #ca8a04;
+  --grade-d: #ea580c;
+  --grade-f: #dc2626;
+  --grade-none: #9ca3af;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow-sm: 0 1px 2px rgba(29, 21, 37, 0.04), 0 1px 1px rgba(29, 21, 37, 0.03);
+  --shadow-md: 0 4px 16px rgba(29, 21, 37, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-alt);
+  color: var(--text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display), 'Fjalla One', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin: 0;
+  color: var(--text);
+}
+
+h1 { font-size: clamp(22px, 3vw, 28px); }
+h2 { font-size: clamp(16px, 2vw, 19px); letter-spacing: 1px; }
+h3 { font-size: 13px; letter-spacing: 1.5px; }
+
+p, span, div, label, input, select, textarea, button {
+  font-family: var(--font-body), 'Poppins', sans-serif;
+}
+
+/* ---------- Layout shell ---------- */
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 32px;
+}
+
+.app-header .logo {
+  display: flex;
+  align-items: center;
+}
+
+.app-header .tag {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 12px;
+}
+
+.app-main {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 40px 32px 80px;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.section-label::before {
+  content: '';
+  width: 20px;
+  height: 2px;
+  background: var(--grad);
+  border-radius: 2px;
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-body), 'Poppins', sans-serif;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  border-radius: var(--radius-sm);
+  padding: 13px 24px;
+  min-width: 120px;
+  cursor: pointer;
+  border: none;
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn:active { transform: translateY(1px); }
+.btn:disabled { cursor: default; opacity: 0.65; transform: none; }
+
+.btn-primary {
+  background: var(--grad);
+  color: var(--white);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-primary:not(:disabled):hover {
+  box-shadow: 0 6px 18px rgba(239, 75, 69, 0.28);
+}
+
+.btn-secondary {
+  background: var(--white);
+  color: var(--text);
+  border: 1.5px solid var(--border-strong);
+}
+
+.btn-secondary:not(:disabled):hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* ---------- Cards ---------- */
+
+.card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+
+.card-empty {
+  background: var(--bg-alt);
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.list-row:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+/* ---------- Grade badge ---------- */
+
+.grade-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--white);
+  font-family: var(--font-display), 'Fjalla One', sans-serif;
+  font-weight: 400;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.grade-a { background: var(--grade-a); }
+.grade-b { background: var(--grade-b); }
+.grade-c { background: var(--grade-c); }
+.grade-d { background: var(--grade-d); }
+.grade-f { background: var(--grade-f); }
+.grade-none { background: var(--grade-none); }
+
+/* ---------- Status pill ---------- */
+
+.pill {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.pill-tracked { background: #dbeafe; color: #1e40af; }
+.pill-lead { background: #fef3c7; color: #92400e; }
+.pill-snapshot { background: #fef3c7; color: #92400e; }
+
+/* ---------- Forms ---------- */
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.field-input {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border);
+  margin-bottom: 16px;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--white);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.field-input:focus {
+  border-color: var(--orange);
+}
+
+.field-error {
+  color: var(--red);
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+
+/* ---------- Misc text ---------- */
+
+.text-muted { color: var(--muted); }
+.text-small { font-size: 13px; }
+.text-tiny { font-size: 12px; }
+
+.meta-line {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.evidence-list {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.evidence-list li { margin-bottom: 3px; }

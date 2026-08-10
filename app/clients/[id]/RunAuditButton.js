@@ -25,14 +25,15 @@ export default function RunAuditButton({ clientId }) {
 
   return (
     <div>
-      <button
-        onClick={onClick}
-        disabled={running}
-        style={{ background: running ? '#9ca3af' : '#111827', color: 'white', padding: '10px 16px', borderRadius: 6, border: 'none', fontSize: 14, cursor: running ? 'default' : 'pointer' }}
-      >
-        {running ? 'Running audit (this hits the live site + Cloro, ~30-60s)...' : 'Run audit now'}
+      <button onClick={onClick} disabled={running} className="btn btn-primary">
+        {running ? 'Running audit...' : 'Run audit now'}
       </button>
-      {error && <p style={{ color: '#dc2626', fontSize: 13, marginTop: 8 }}>{error}</p>}
+      {running && (
+        <p className="text-tiny text-muted" style={{ marginTop: 6, marginBottom: 0, textAlign: 'right' }}>
+          Hits the live site + Cloro, ~30-60s
+        </p>
+      )}
+      {error && <p className="field-error" style={{ marginTop: 8, textAlign: 'right' }}>{error}</p>}
     </div>
   )
 }

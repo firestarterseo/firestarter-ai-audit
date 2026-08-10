@@ -32,40 +32,38 @@ export default function NewClientPage() {
     return e => setForm(f => ({ ...f, [field]: e.target.value }))
   }
 
-  const inputStyle = { display: 'block', width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #d1d5db', marginBottom: 12, fontSize: 14 }
-  const labelStyle = { display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }
-
   return (
-    <div style={{ maxWidth: 480 }}>
-      <h1 style={{ fontSize: 22 }}>Add client</h1>
-      <form onSubmit={onSubmit} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 8, padding: 20 }}>
-        <label style={labelStyle}>Name *</label>
-        <input style={inputStyle} value={form.name} onChange={set('name')} required />
+    <div style={{ maxWidth: 520 }}>
+      <div className="section-label">Internal Grader</div>
+      <h1 style={{ marginBottom: 24 }}>Add client</h1>
+      <form onSubmit={onSubmit} className="card" style={{ padding: 28 }}>
+        <label className="field-label">Name *</label>
+        <input className="field-input" value={form.name} onChange={set('name')} required />
 
-        <label style={labelStyle}>URL *</label>
-        <input style={inputStyle} placeholder="https://example.com" value={form.url} onChange={set('url')} required />
+        <label className="field-label">URL *</label>
+        <input className="field-input" placeholder="https://example.com" value={form.url} onChange={set('url')} required />
 
-        <label style={labelStyle}>City</label>
-        <input style={inputStyle} value={form.city} onChange={set('city')} />
+        <label className="field-label">City</label>
+        <input className="field-input" value={form.city} onChange={set('city')} />
 
-        <label style={labelStyle}>Region / State</label>
-        <input style={inputStyle} value={form.region} onChange={set('region')} />
+        <label className="field-label">Region / State</label>
+        <input className="field-input" value={form.region} onChange={set('region')} />
 
-        <label style={labelStyle}>Category</label>
-        <input style={inputStyle} placeholder="e.g. accounting and tax service" value={form.category} onChange={set('category')} />
+        <label className="field-label">Category</label>
+        <input className="field-input" placeholder="e.g. accounting and tax service" value={form.category} onChange={set('category')} />
 
-        <label style={labelStyle}>Status</label>
-        <select style={inputStyle} value={form.status} onChange={set('status')}>
+        <label className="field-label">Status</label>
+        <select className="field-input" value={form.status} onChange={set('status')}>
           <option value="lead">Lead (no history -- snapshot mode)</option>
           <option value="tracked">Tracked client (recurring history)</option>
         </select>
 
-        <label style={labelStyle}>Notes</label>
-        <textarea style={{ ...inputStyle, minHeight: 60 }} value={form.notes} onChange={set('notes')} />
+        <label className="field-label">Notes</label>
+        <textarea className="field-input" style={{ minHeight: 70 }} value={form.notes} onChange={set('notes')} />
 
-        {error && <p style={{ color: '#dc2626', fontSize: 13 }}>{error}</p>}
+        {error && <p className="field-error">{error}</p>}
 
-        <button type="submit" disabled={submitting} style={{ background: '#111827', color: 'white', padding: '10px 16px', borderRadius: 6, border: 'none', fontSize: 14, cursor: 'pointer' }}>
+        <button type="submit" disabled={submitting} className="btn btn-primary" style={{ width: '100%' }}>
           {submitting ? 'Creating...' : 'Create client'}
         </button>
       </form>

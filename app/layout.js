@@ -1,19 +1,34 @@
+import Image from 'next/image'
+import Link from 'next/link'
+
+// Firestarter brand typography: Fjalla One for display/headings, Poppins for
+// body & UI. Self-hosted via @fontsource (bundled at build time, zero
+// runtime requests to Google Fonts -- more reliable than next/font/google,
+// which needs live network access to fonts.googleapis.com during the build).
+import '@fontsource/fjalla-one/400.css'
+import '@fontsource/poppins/300.css'
+import '@fontsource/poppins/400.css'
+import '@fontsource/poppins/500.css'
+import '@fontsource/poppins/600.css'
+import '@fontsource/poppins/700.css'
+import './globals.css'
+
 export const metadata = {
-  title: 'Firestarter AI Audit -- Internal Grader',
-  description: 'Internal dashboard for the 5-pillar AI audit tool.'
+  title: 'Firestarter -- Internal AI Audit Grader',
+  description: 'Internal dashboard for the 5-pillar AI visibility audit tool.'
 }
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body style={{ fontFamily: 'system-ui, -apple-system, sans-serif', margin: 0, background: '#f7f7f8', color: '#1a1a1a' }}>
-        <header style={{ padding: '16px 24px', background: '#111827', color: 'white', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <a href="/clients" style={{ color: 'white', textDecoration: 'none', fontWeight: 600, fontSize: 18 }}>
-            Firestarter AI Audit -- Internal Grader
-          </a>
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: '#9ca3af' }}>Internal only &middot; never touches ActiveCampaign</span>
+      <body>
+        <header className="app-header">
+          <Link href="/clients" className="logo">
+            <Image src="/brand/logo-color.png" alt="Firestarter" width={150} height={45} priority style={{ height: 32, width: 'auto' }} />
+          </Link>
+          <span className="tag">Internal only &middot; never touches ActiveCampaign</span>
         </header>
-        <main style={{ maxWidth: 1000, margin: '0 auto', padding: '24px' }}>{children}</main>
+        <main className="app-main">{children}</main>
       </body>
     </html>
   )

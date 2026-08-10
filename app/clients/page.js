@@ -5,13 +5,13 @@ import { listClientsWithLatestRun } from '../../lib/data'
 // client) on every request -- never prerender/cache it at build time.
 export const dynamic = 'force-dynamic'
 
-function gradeColor(grade) {
-  if (!grade) return '#9ca3af'
-  if (grade.startsWith('A')) return '#16a34a'
-  if (grade.startsWith('B')) return '#65a30d'
-  if (grade.startsWith('C')) return '#ca8a04'
-  if (grade.startsWith('D')) return '#ea580c'
-  return '#dc2626'
+function gradeClass(grade) {
+  if (!grade) return 'grade-none'
+  if (grade.startsWith('A')) return 'grade-a'
+  if (grade.startsWith('B')) return 'grade-b'
+  if (grade.startsWith('C')) return 'grade-c'
+  if (grade.startsWith('D')) return 'grade-d'
+  return 'grade-f'
 }
 
 export default async function ClientsPage() {
@@ -19,59 +19,39 @@ export default async function ClientsPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 20 }}>
-        <h1 style={{ fontSize: 22, margin: 0 }}>Clients</h1>
-        <Link href="/clients/new" style={{ marginLeft: 'auto', background: '#111827', color: 'white', padding: '8px 14px', borderRadius: 6, textDecoration: 'none', fontSize: 14 }}>
+      <div className="page-header">
+        <div>
+          <div className="section-label">Internal Grader</div>
+          <h1>Clients</h1>
+        </div>
+        <Link href="/clients/new" className="btn btn-primary" style={{ marginLeft: 'auto' }}>
           + Add client
         </Link>
       </div>
 
       {clients.length === 0 && (
-        <p style={{ color: '#6b7280' }}>No clients yet. Add one to run the first audit.</p>
+        <div className="card-empty" style={{ padding: 32, textAlign: 'center' }}>
+          <p className="text-muted" style={{ margin: 0 }}>No clients yet. Add one to run the first audit.</p>
+        </div>
       )}
 
       <div style={{ display: 'grid', gap: 10 }}>
         {clients.map(c => (
-          <Link
-            key={c.id}
-            href={`/clients/${c.id}`}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 16,
-              background: 'white',
-              border: '1px solid #e5e7eb',
-              borderRadius: 8,
-              padding: '14px 16px',
-              textDecoration: 'none',
-              color: 'inherit'
-            }}
-          >
+          <Link key={c.id} href={`/clients/${c.id}`} className="list-row">
             <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 8,
-                background: gradeColor(c.latestRun?.overall_grade),
-                color: 'white',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 700,
-                fontSize: 16,
-                flexShrink: 0
-              }}
+              className={`grade-badge ${gradeClass(c.latestRun?.overall_grade)}`}
+              style={{ width: 48, height: 48, fontSize: 17 }}
             >
               {c.latestRun?.overall_grade || '--'}
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600 }}>{c.name}</div>
-              <div style={{ fontSize: 13, color: '#6b7280' }}>{c.domain}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>{c.name}</div>
+              <div className="text-small text-muted">{c.domain}</div>
             </div>
-            <span style={{ fontSize: 12, background: c.status === 'tracked' ? '#dbeafe' : '#fef3c7', color: c.status === 'tracked' ? '#1e40af' : '#92400e', borderRadius: 4, padding: '2px 8px' }}>
+            <span className={`pill ${c.status === 'tracked' ? 'pill-tracked' : 'pill-lead'}`}>
               {c.status}
             </span>
-            <div style={{ fontSize: 12, color: '#9ca3af', minWidth: 130, textAlign: 'right' }}>
+            <div className="text-tiny text-muted" style={{ minWidth: 130, textAlign: 'right' }}>
               {c.latestRun ? `Last run ${new Date(c.latestRun.run_at).toLocaleDateString()}` : 'Never audited'}
             </div>
           </Link>
