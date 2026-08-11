@@ -302,6 +302,60 @@ p, span, div, label, input, select, textarea, button {
 
 .evidence-list li { margin-bottom: 3px; }
 
+/* ---------- Issues punch-list (severity-tagged findings) ---------- */
+
+.issue-item {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.issue-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border-radius: 4px;
+  padding: 2px 7px;
+  color: var(--white);
+}
+
+.issue-critical { background: var(--grade-f); }
+.issue-moderate { background: var(--grade-d); }
+.issue-minor { background: var(--grade-c); }
+.issue-info { background: var(--grade-none); }
+
+.issue-item:has(.issue-critical) { border-left-color: var(--grade-f); }
+.issue-item:has(.issue-moderate) { border-left-color: var(--grade-d); }
+.issue-item:has(.issue-minor) { border-left-color: var(--grade-c); }
+.issue-item:has(.issue-info) { border-left-color: var(--grade-none); }
+
+.issue-why {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+/* ---------- Collapsed raw evidence (demoted below the issues punch-list) ---------- */
+
+.raw-details {
+  margin-top: 12px;
+}
+
+.raw-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.3px;
+}
+
+.raw-details .evidence-list {
+  margin-top: 8px;
+}
+
 /* ---------- Loading spinner (audit-running overlay) ---------- */
 
 .audit-spinner {

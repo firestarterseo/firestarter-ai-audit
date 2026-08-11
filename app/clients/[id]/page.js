@@ -62,6 +62,39 @@ function CheckRow({ checks }) {
   )
 }
 
+const ISSUE_SEVERITY_RANK = { critical: 0, moderate: 1, minor: 2, info: 3 }
+const ISSUE_SEVERITY_LABEL = { critical: 'Critical', moderate: 'Moderate', minor: 'Minor', info: 'Not verified' }
+
+// The punch-list view: each finding tagged with a severity chip, a
+// plain-English "why this matters," and the concrete fix -- per the user's
+// explicit direction (see project notes): this is the primary read now, and
+// the raw evidence list is demoted below it into a collapsed <details>.
+// "info" is deliberately distinct from critical/moderate/minor -- it means
+// a data gap (no API key configured, etc), not a site actually failing
+// something, so it's labeled "Not verified" rather than a severity.
+function IssuesList({ issues }) {
+  if (!Array.isArray(issues) || issues.length === 0) return null
+  const sorted = [...issues].sort((a, b) => (ISSUE_SEVERITY_RANK[a.severity] ?? 4) - (ISSUE_SEVERITY_RANK[b.severity] ?? 4))
+  return (
+    <div style={{ display: 'grid', gap: 8, margin: '10px 0' }}>
+      {sorted.map((issue, i) => (
+        <div key={i} className="issue-item">
+          <span className={`issue-badge issue-${issue.severity || 'info'}`}>
+            {ISSUE_SEVERITY_LABEL[issue.severity] || issue.severity}
+          </span>
+          <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{issue.message}</div>
+          {issue.why && <p className="text-small issue-why">{issue.why}</p>}
+          {issue.recommendation && (
+            <p className="text-small" style={{ margin: '4px 0 0', color: 'var(--text)' }}>
+              <b>Fix:</b> {issue.recommendation}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function PillarCard({ pillarKey, pillar, children }) {
   if (!pillar) {
     if (NOT_YET_BUILT.has(pillarKey)) {
@@ -107,17 +140,26 @@ function PillarCard({ pillarKey, pillar, children }) {
           )}
         </div>
       </div>
-      {pillar.finding && <p style={{ fontSize: 14, margin: '6px 0' }}>{pillar.finding}</p>}
       <CheckRow checks={pillar.checks} />
-      {pillar.recommendation && (
-        <p className="text-small" style={{ margin: '6px 0', color: 'var(--text)' }}>
-          <b>Recommendation:</b> {pillar.recommendation}
-        </p>
+      {Array.isArray(pillar.issues) && pillar.issues.length > 0 ? (
+        <IssuesList issues={pillar.issues} />
+      ) : (
+        <>
+          {pillar.finding && <p style={{ fontSize: 14, margin: '6px 0' }}>{pillar.finding}</p>}
+          {pillar.recommendation && (
+            <p className="text-small" style={{ margin: '6px 0', color: 'var(--text)' }}>
+              <b>Recommendation:</b> {pillar.recommendation}
+            </p>
+          )}
+        </>
       )}
       {Array.isArray(pillar.evidence) && pillar.evidence.length > 0 && (
-        <ul className="evidence-list">
-          {pillar.evidence.map((e, i) => <li key={i}>{e}</li>)}
-        </ul>
+        <details className="raw-details">
+          <summary>Raw technical details ({pillar.evidence.length})</summary>
+          <ul className="evidence-list">
+            {pillar.evidence.map((e, i) => <li key={i}>{e}</li>)}
+          </ul>
+        </details>
       )}
       {children}
     </div>
