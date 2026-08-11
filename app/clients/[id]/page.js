@@ -1,6 +1,7 @@
 import { getClientWithRuns } from '../../../lib/data'
 import RunAuditButton from './RunAuditButton'
 import PromptTester from './PromptTester'
+import TestPromptsManager from './TestPromptsManager'
 
 export const dynamic = 'force-dynamic'
 
@@ -121,7 +122,8 @@ export default async function ClientDetailPage({ params }) {
         </div>
       )}
 
-      <div style={{ marginTop: 24 }}>
+      <div style={{ marginTop: 24, display: 'grid', gap: 16 }}>
+        <TestPromptsManager clientId={client.id} savedPrompts={client.test_prompts} />
         <PromptTester clientId={client.id} />
       </div>
 
