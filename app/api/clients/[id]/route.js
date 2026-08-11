@@ -1,5 +1,6 @@
 const { getClientWithRuns } = require('../../../../lib/data')
 const { getSupabaseServerClient } = require('../../../../lib/supabaseServer')
+const { resolveSchemaType } = require('../../../../lib/schemaGenerator')
 
 async function GET(request, { params }) {
   try {
@@ -11,23 +12,53 @@ async function GET(request, { params }) {
   }
 }
 
-// PATCH { status: 'lead' | 'tracked' } -- the only field this supports
-// today. Moving a client to 'tracked' is what makes the weekly cron job
-// (lib/trackAiVisibility.js) start picking them up; moving back to 'lead'
-// stops that and reverts the AI & GEO Visibility pillar to one-off
-// snapshot mode on the next audit. Before this endpoint existed, changing
-// status required a direct SQL update against Supabase.
+// PATCH -- originally just { status }, now also accepts the Schema
+// Generator's business-detail fields (street_address, postal_code, phone,
+// description, same_as, schema_type). All fields are optional and only the
+// ones actually present in the body get updated, so the existing
+// status-toggle caller (ClientActions.js, which only ever sends { status })
+// keeps working unchanged.
 async function PATCH(request, { params }) {
   const { id } = await params
   const body = await request.json().catch(() => ({}))
-  if (body.status !== 'lead' && body.status !== 'tracked') {
-    return Response.json({ error: 'status must be "lead" or "tracked".' }, { status: 400 })
+
+  const update = { updated_at: new Date().toISOString() }
+
+  if ('status' in body) {
+    if (body.status !== 'lead' && body.status !== 'tracked') {
+      return Response.json({ error: 'status must be "lead" or "tracked".' }, { status: 400 })
+    }
+    update.status = body.status
+  }
+
+  // Schema Generator fields -- see lib/schemaGenerator.js. Plain strings,
+  // trimmed and nulled-out-if-empty so clearing a field in the form
+  // actually clears it in the DB rather than saving an empty string.
+  ;['street_address', 'postal_code', 'phone', 'description'].forEach(field => {
+    if (field in body) {
+      const value = typeof body[field] === 'string' ? body[field].trim() : ''
+      update[field] = value || null
+    }
+  })
+
+  if ('same_as' in body) {
+    update.same_as = Array.isArray(body.same_as)
+      ? body.same_as.map(u => String(u).trim()).filter(Boolean)
+      : []
+  }
+
+  if ('schema_type' in body) {
+    // resolveSchemaType falls back to 'LocalBusiness' for anything not in
+    // checker.js's own recognized BUSINESS_ENTITY_TYPES list -- generated
+    // schema must only ever use a type this project's own checker can
+    // actually grade, per schemaGenerator.js's header comment.
+    update.schema_type = resolveSchemaType({ schema_type: body.schema_type })
   }
 
   const supabase = getSupabaseServerClient()
   const { data, error } = await supabase
     .from('clients')
-    .update({ status: body.status, updated_at: new Date().toISOString() })
+    .update(update)
     .eq('id', id)
     .select()
     .single()

@@ -3,6 +3,7 @@ import RunAuditButton from './RunAuditButton'
 import PromptTester from './PromptTester'
 import TestPromptsManager from './TestPromptsManager'
 import ClientActions from './ClientActions'
+import SchemaGenerator from './SchemaGenerator'
 
 export const dynamic = 'force-dynamic'
 
@@ -299,6 +300,11 @@ export default async function ClientDetailPage({ params }) {
               <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)', display: 'grid', gap: 14 }}>
                 <TestPromptsManager clientId={client.id} savedPrompts={client.test_prompts} bare />
                 <PromptTester clientId={client.id} bare />
+              </div>
+            )}
+            {key === 'schema_structure' && (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+                <SchemaGenerator clientId={client.id} client={client} bare />
               </div>
             )}
           </PillarCard>
