@@ -10,15 +10,18 @@ import { useRouter } from 'next/navigation'
 //
 // On mount, this auto-fetches whatever the tool can detect from the
 // client's own live homepage (existing partial schema, tel: links, social
-// links) and pre-fills the form with it -- a strategist should be
-// reviewing and confirming real data pulled from the site, not typing
-// address/phone/social links in from a blank form when the site already
-// has the answer. Fields that came from auto-detection are labeled as
-// such; anything already saved on the client record is left alone.
+// links, meta description) and pre-fills the form with it -- a strategist
+// should be reviewing and confirming real data pulled from the site, not
+// typing address/phone/social links/description in from a blank form when
+// the site already has the answer. Fields that came from auto-detection
+// are labeled as such; anything already saved on the client record is left
+// alone.
 export default function SchemaGenerator({ clientId, client, bare = false }) {
   const router = useRouter()
   const [form, setForm] = useState({
     street_address: client.street_address || '',
+    city: client.city || '',
+    region: client.region || '',
     postal_code: client.postal_code || '',
     phone: client.phone || '',
     description: client.description || '',
@@ -61,14 +64,20 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
           setForm(f => ({
             ...f,
             street_address: f.street_address || suggested.street_address || f.street_address,
+            city: f.city || suggested.city || f.city,
+            region: f.region || suggested.region || f.region,
             postal_code: f.postal_code || suggested.postal_code || f.postal_code,
             phone: f.phone || suggested.phone || f.phone,
+            description: f.description || suggested.description || f.description,
             same_as: f.same_as || (suggested.same_as ? suggested.same_as.join('\n') : f.same_as)
           }))
           setAutoFilled({
             street_address: !!suggested.street_address,
+            city: !!suggested.city,
+            region: !!suggested.region,
             postal_code: !!suggested.postal_code,
             phone: !!suggested.phone,
+            description: !!suggested.description,
             same_as: !!suggested.same_as
           })
         }
@@ -89,6 +98,8 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           street_address: form.street_address,
+          city: form.city,
+          region: form.region,
           postal_code: form.postal_code,
           phone: form.phone,
           description: form.description,
@@ -148,18 +159,26 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
           <label className="field-label">Street address{autoFilled.street_address && ' (auto)'}</label>
           <input className="field-input" style={{ marginBottom: 0 }} value={form.street_address} onChange={e => update('street_address', e.target.value)} placeholder="123 Main St" />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 12 }}>
+          <div>
+            <label className="field-label">City{autoFilled.city && ' (auto)'}</label>
+            <input className="field-input" style={{ marginBottom: 0 }} value={form.city} onChange={e => update('city', e.target.value)} placeholder="Denver" />
+          </div>
+          <div>
+            <label className="field-label">State{autoFilled.region && ' (auto)'}</label>
+            <input className="field-input" style={{ marginBottom: 0 }} value={form.region} onChange={e => update('region', e.target.value)} placeholder="CO" />
+          </div>
           <div>
             <label className="field-label">Postal code{autoFilled.postal_code && ' (auto)'}</label>
             <input className="field-input" style={{ marginBottom: 0 }} value={form.postal_code} onChange={e => update('postal_code', e.target.value)} placeholder="80202" />
           </div>
-          <div>
-            <label className="field-label">Phone{autoFilled.phone && ' (auto)'}</label>
-            <input className="field-input" style={{ marginBottom: 0 }} value={form.phone} onChange={e => update('phone', e.target.value)} placeholder="(303) 555-0100" />
-          </div>
         </div>
         <div>
-          <label className="field-label">Description (1-2 sentences)</label>
+          <label className="field-label">Phone{autoFilled.phone && ' (auto)'}</label>
+          <input className="field-input" style={{ marginBottom: 0 }} value={form.phone} onChange={e => update('phone', e.target.value)} placeholder="(303) 555-0100" />
+        </div>
+        <div>
+          <label className="field-label">Description (1-2 sentences){autoFilled.description && ' (auto, from the site\'s meta description -- review before saving)'}</label>
           <input className="field-input" style={{ marginBottom: 0 }} value={form.description} onChange={e => update('description', e.target.value)} placeholder="What this business does, in its own words." />
         </div>
         <div>

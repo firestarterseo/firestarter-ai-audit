@@ -34,7 +34,12 @@ async function PATCH(request, { params }) {
   // Schema Generator fields -- see lib/schemaGenerator.js. Plain strings,
   // trimmed and nulled-out-if-empty so clearing a field in the form
   // actually clears it in the DB rather than saving an empty string.
-  ;['street_address', 'postal_code', 'phone', 'description'].forEach(field => {
+  // city/region are included here too (not just the fields added in the
+  // schema-generator migration) since the Schema Generator's live-site
+  // auto-detection can now fill them in when a client was created without
+  // them -- this is the only save path that touches them besides the
+  // "new client" form, which sets them once at creation and never again.
+  ;['street_address', 'city', 'region', 'postal_code', 'phone', 'description'].forEach(field => {
     if (field in body) {
       const value = typeof body[field] === 'string' ? body[field].trim() : ''
       update[field] = value || null
