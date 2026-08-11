@@ -2,12 +2,16 @@ const { getSupabaseServerClient } = require('../../../../../lib/supabaseServer')
 const { runAudit } = require('../../../../../lib/runAudit')
 
 // A full audit fetches the live site AND queries 5 AI engines through Cloro
-// -- routinely 30-60s. Without this, Vercel's default function duration can
-// cut the response off before the browser hears back, even though the run
-// itself completes and writes to the DB fine (which is exactly what made
-// the "Run audit now" button look frozen -- the work finished, the HTTP
-// response just never made it back in time).
-const maxDuration = 60
+// concurrently -- but Cloro's per-engine sync calls have no timeout of
+// their own (see defaultCloroCaller in ai-visibility-snapshot-checker.js),
+// and real-world latency on the slowest engine can run well past 60s.
+// Vercel's Hobby-plan default/max function duration is actually 300s (5
+// min) as of mid-2026 -- an earlier maxDuration=60 here was a
+// self-imposed limit well under what the platform allows, and was the
+// actual cause of runs appearing to "freeze": the function got killed by
+// THIS number, not by Vercel's real ceiling. Set generously below the
+// platform max, not below what the slowest real Cloro call needs.
+const maxDuration = 120
 
 async function POST(request, { params }) {
   const { id } = await params

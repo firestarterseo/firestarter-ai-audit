@@ -18,7 +18,7 @@ export default function RunAuditButton({ clientId }) {
     // write to the DB even if this specific request times out client-side
     // -- refreshing will show it if so.
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 75000)
+    const timeout = setTimeout(() => controller.abort(), 130000)
     try {
       const res = await fetch(`/api/clients/${clientId}/audit`, { method: 'POST', signal: controller.signal })
       const data = await res.json()
@@ -26,7 +26,7 @@ export default function RunAuditButton({ clientId }) {
       router.refresh()
     } catch (err) {
       if (err.name === 'AbortError') {
-        setError('This is taking longer than expected (75s+). The audit may still finish in the background -- try refreshing the page in a bit to check.')
+        setError('This is taking longer than expected (2min+). The audit may still finish in the background -- try refreshing the page in a bit to check.')
       } else {
         setError(err.message)
       }
@@ -43,7 +43,7 @@ export default function RunAuditButton({ clientId }) {
       </button>
       {running && (
         <p className="text-tiny text-muted" style={{ marginTop: 6, marginBottom: 0, textAlign: 'right' }}>
-          Hits the live site + Cloro, ~30-60s
+          Hits the live site + Cloro (5 AI engines), usually 30-60s, occasionally up to ~2min
         </p>
       )}
       {error && <p className="field-error" style={{ marginTop: 8, textAlign: 'right' }}>{error}</p>}

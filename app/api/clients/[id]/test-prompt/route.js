@@ -9,7 +9,10 @@ const { checkAiVisibilitySnapshot, DEFAULT_ENGINES } = require('../../../../../l
 // client's graded history. Same live 5-engine Cloro call under the hood,
 // same CLORO_API_KEY (only ever read from the server env, never touched
 // or logged here).
-const maxDuration = 60
+// See app/api/clients/[id]/audit/route.js for why this is 120, not 60 --
+// Cloro's per-engine calls have no fixed latency ceiling, and Hobby-plan
+// Vercel functions actually allow up to 300s.
+const maxDuration = 120
 
 async function POST(request, { params }) {
   const { id } = await params

@@ -23,7 +23,7 @@ export default function PromptTester({ clientId }) {
     setError(null)
     setResult(null)
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 75000)
+    const timeout = setTimeout(() => controller.abort(), 130000)
     try {
       const res = await fetch(`/api/clients/${clientId}/test-prompt`, {
         method: 'POST',
@@ -35,7 +35,7 @@ export default function PromptTester({ clientId }) {
       if (!res.ok) throw new Error(data.error || 'Prompt test failed')
       setResult(data)
     } catch (err) {
-      setError(err.name === 'AbortError' ? 'Taking longer than expected (75s+) -- try again.' : err.message)
+      setError(err.name === 'AbortError' ? 'Taking longer than expected (2min+) -- try again.' : err.message)
     } finally {
       clearTimeout(timeout)
       setRunning(false)
