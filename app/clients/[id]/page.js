@@ -95,6 +95,63 @@ function IssuesList({ issues }) {
   )
 }
 
+// AI & GEO Visibility-specific transparency view -- per direct feedback
+// that a grade alone isn't enough to trust ("provide more transparency on
+// where they showed up and what the results of the queries were... so I can
+// manually test them and make sure there is not a bug"). Shows exactly what
+// each engine said for each prompt: mentioned/cited/sentiment, a snippet of
+// the actual answer, and any source URLs -- everything needed to re-run the
+// same prompt on the same engine by hand and compare. `raw.engineResults`
+// covers the snapshot (lead) shape; `raw.latestBreakdown` covers the
+// tracked shape (just the most recent weekly run, not the full history --
+// see ai-visibility-checker.js).
+function AiVisibilityVerify({ raw, snapshot }) {
+  if (!raw) return null
+  const rows = snapshot
+    ? (Array.isArray(raw.engineResults) ? raw.engineResults : [])
+    : (Array.isArray(raw.latestBreakdown) ? raw.latestBreakdown : [])
+  if (rows.length === 0) return null
+
+  return (
+    <details className="raw-details">
+      <summary>Verify these results -- engine by engine ({rows.length})</summary>
+      <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+        {rows.map((r, i) => (
+          <div key={i} className="issue-item">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span className="issue-badge" style={{ background: r.weight >= 2 ? 'var(--orange)' : 'var(--muted-2)' }}>
+                {r.engine}{r.weight >= 2 ? ' -- high priority' : ''}
+              </span>
+              <span className="text-small text-muted">&ldquo;{r.prompt}&rdquo;</span>
+            </div>
+            {r.ok === false ? (
+              <p className="text-small" style={{ margin: '6px 0 0', color: 'var(--grade-f)' }}>Call failed: {r.error || 'unknown error'}</p>
+            ) : (
+              <>
+                <p className="text-small" style={{ margin: '6px 0 0' }}>
+                  {r.mentioned ? '✓ Mentioned' : '✗ Not mentioned'}
+                  {r.mentioned ? (r.cited ? ' · ✓ cited own domain' : ' · not cited from own domain') : ''}
+                  {r.sentiment ? ` · sentiment: ${r.sentiment}` : ''}
+                </p>
+                {r.responseSnippet && (
+                  <p className="text-small text-muted" style={{ margin: '4px 0 0', fontStyle: 'italic' }}>
+                    &ldquo;{r.responseSnippet}{r.responseSnippet.length >= 400 ? '…' : ''}&rdquo;
+                  </p>
+                )}
+                {Array.isArray(r.sourceUrls) && r.sourceUrls.length > 0 && (
+                  <p className="text-tiny text-muted" style={{ margin: '4px 0 0', wordBreak: 'break-all' }}>
+                    Sources: {r.sourceUrls.join(', ')}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </details>
+  )
+}
+
 function PillarCard({ pillarKey, pillar, children }) {
   if (!pillar) {
     if (NOT_YET_BUILT.has(pillarKey)) {
@@ -161,6 +218,7 @@ function PillarCard({ pillarKey, pillar, children }) {
           </ul>
         </details>
       )}
+      {pillarKey === 'ai_geo_visibility' && <AiVisibilityVerify raw={pillar.raw} snapshot={pillar.snapshot} />}
       {children}
     </div>
   )
