@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 const MIN_PROMPTS = 3
 const MAX_PROMPTS = 7
 
-export default function TestPromptsManager({ clientId, savedPrompts }) {
+export default function TestPromptsManager({ clientId, savedPrompts, bare = false }) {
   const router = useRouter()
   const [suggesting, setSuggesting] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -74,7 +74,7 @@ export default function TestPromptsManager({ clientId, savedPrompts }) {
   }
 
   return (
-    <div className="card" style={{ padding: 18 }}>
+    <div className={bare ? undefined : 'card'} style={bare ? undefined : { padding: 18 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
         <div style={{ fontWeight: 600, fontSize: 14 }}>AI-visibility test terms</div>
         <span className={`pill ${isConfirmed ? 'pill-tracked' : 'pill-lead'}`} style={{ marginLeft: 'auto' }}>

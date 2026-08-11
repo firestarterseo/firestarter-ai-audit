@@ -15,6 +15,13 @@ const PILLAR_LABELS = {
 
 const PILLAR_ORDER = ['schema_structure', 'technical_foundation', 'ai_geo_visibility', 'content_authority', 'competitive_position']
 
+// Only Competitive Position is genuinely "not built" (blocked on a vendor
+// decision, see lib/runAudit.js header). Every other pillar just hasn't
+// been audited yet on a brand-new client -- those two states need
+// different messaging, and ai_geo_visibility additionally needs its setup
+// UI (children) available even before that first audit, not only after.
+const NOT_YET_BUILT = new Set(['competitive_position'])
+
 function gradeClass(grade) {
   if (!grade) return 'grade-none'
   if (grade.startsWith('A')) return 'grade-a'
@@ -24,12 +31,21 @@ function gradeClass(grade) {
   return 'grade-f'
 }
 
-function PillarCard({ pillarKey, pillar }) {
+function PillarCard({ pillarKey, pillar, children }) {
   if (!pillar) {
+    if (NOT_YET_BUILT.has(pillarKey)) {
+      return (
+        <div className="card-empty" style={{ padding: 18 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 14 }}>{PILLAR_LABELS[pillarKey]}</div>
+          <div className="text-small text-muted">Not yet built -- blocked on a backlink/rank-tracking vendor decision.</div>
+        </div>
+      )
+    }
     return (
-      <div className="card-empty" style={{ padding: 18 }}>
+      <div className="card" style={{ padding: 18 }}>
         <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 14 }}>{PILLAR_LABELS[pillarKey]}</div>
-        <div className="text-small text-muted">Not yet built -- blocked on a backlink/rank-tracking vendor decision.</div>
+        <div className="text-small text-muted" style={{ marginBottom: children ? 14 : 0 }}>Not yet audited.</div>
+        {children}
       </div>
     )
   }
@@ -66,6 +82,7 @@ function PillarCard({ pillarKey, pillar }) {
           {pillar.evidence.map((e, i) => <li key={i}>{e}</li>)}
         </ul>
       )}
+      {children}
     </div>
   )
 }
@@ -96,35 +113,38 @@ export default async function ClientDetailPage({ params }) {
       </div>
 
       {latestRun ? (
-        <>
-          <div className="meta-line" style={{ marginBottom: 14 }}>
-            Last run {new Date(latestRun.run_at).toLocaleString()} ({latestRun.trigger_source}) &middot; Overall:{' '}
-            <b style={{
-              fontWeight: 700,
-              color:
-                latestRun.overall_grade?.startsWith('A') ? 'var(--grade-a)' :
-                latestRun.overall_grade?.startsWith('B') ? 'var(--grade-b)' :
-                latestRun.overall_grade?.startsWith('C') ? 'var(--grade-c)' :
-                latestRun.overall_grade?.startsWith('D') ? 'var(--grade-d)' :
-                latestRun.overall_grade ? 'var(--grade-f)' : 'var(--grade-none)'
-            }}>
-              {latestRun.overall_grade || '--'}
-            </b>{' '}
-            ({latestRun.overall_score ?? '--'})
-          </div>
-          <div style={{ display: 'grid', gap: 12 }}>
-            {PILLAR_ORDER.map(key => <PillarCard key={key} pillarKey={key} pillar={pillarsByKey.get(key)} />)}
-          </div>
-        </>
-      ) : (
-        <div className="card-empty" style={{ padding: 32, textAlign: 'center' }}>
-          <p className="text-muted" style={{ margin: 0 }}>No audits run yet. Click &ldquo;Run audit now&rdquo; to grade this client for the first time.</p>
+        <div className="meta-line" style={{ marginBottom: 14 }}>
+          Last run {new Date(latestRun.run_at).toLocaleString()} ({latestRun.trigger_source}) &middot; Overall:{' '}
+          <b style={{
+            fontWeight: 700,
+            color:
+              latestRun.overall_grade?.startsWith('A') ? 'var(--grade-a)' :
+              latestRun.overall_grade?.startsWith('B') ? 'var(--grade-b)' :
+              latestRun.overall_grade?.startsWith('C') ? 'var(--grade-c)' :
+              latestRun.overall_grade?.startsWith('D') ? 'var(--grade-d)' :
+              latestRun.overall_grade ? 'var(--grade-f)' : 'var(--grade-none)'
+          }}>
+            {latestRun.overall_grade || '--'}
+          </b>{' '}
+          ({latestRun.overall_score ?? '--'})
         </div>
+      ) : (
+        <p className="text-small text-muted" style={{ marginBottom: 14 }}>
+          No audits run yet -- set up AI-visibility test terms below, then click &ldquo;Run audit now&rdquo; to grade this client for the first time.
+        </p>
       )}
 
-      <div style={{ marginTop: 24, display: 'grid', gap: 16 }}>
-        <TestPromptsManager clientId={client.id} savedPrompts={client.test_prompts} />
-        <PromptTester clientId={client.id} />
+      <div style={{ display: 'grid', gap: 12 }}>
+        {PILLAR_ORDER.map(key => (
+          <PillarCard key={key} pillarKey={key} pillar={pillarsByKey.get(key)}>
+            {key === 'ai_geo_visibility' && (
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)', display: 'grid', gap: 14 }}>
+                <TestPromptsManager clientId={client.id} savedPrompts={client.test_prompts} bare />
+                <PromptTester clientId={client.id} bare />
+              </div>
+            )}
+          </PillarCard>
+        ))}
       </div>
 
       {runs.length > 1 && (

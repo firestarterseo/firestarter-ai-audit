@@ -10,7 +10,7 @@ const ENGINE_LABELS = {
   google: 'Google'
 }
 
-export default function PromptTester({ clientId }) {
+export default function PromptTester({ clientId, bare = false }) {
   const [prompt, setPrompt] = useState('')
   const [running, setRunning] = useState(false)
   const [error, setError] = useState(null)
@@ -43,7 +43,7 @@ export default function PromptTester({ clientId }) {
   }
 
   return (
-    <div className="card" style={{ padding: 18 }}>
+    <div className={bare ? undefined : 'card'} style={bare ? undefined : { padding: 18 }}>
       <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Test a prompt</div>
       <p className="text-small text-muted" style={{ margin: '0 0 14px' }}>
         Fires this exact phrasing at all 5 AI engines live, right now. Not graded, not saved to history --
