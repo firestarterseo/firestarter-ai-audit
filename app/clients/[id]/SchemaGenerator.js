@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
 // The Schema Generator UI -- see lib/schemaGenerator.js and ROADMAP.md for
@@ -8,12 +8,13 @@ import { useRouter } from 'next/navigation'
 // schema-related recommendation; this generates and lets a strategist ship
 // the fix directly, instead of just reporting the gap).
 //
-// Two states: an editable "business details" form (the raw facts the
-// generator needs -- most of this is optional, since even a bare name+url
-// node is valid, real schema), and a generated-output view with the
-// JSON-LD, a ready <script> snippet, and a live preview grade showing what
-// this exact markup would score in the Schema & Structure pillar --
-// "checked before it ever ships," per the original plan.
+// On mount, this auto-fetches whatever the tool can detect from the
+// client's own live homepage (existing partial schema, tel: links, social
+// links) and pre-fills the form with it -- a strategist should be
+// reviewing and confirming real data pulled from the site, not typing
+// address/phone/social links in from a blank form when the site already
+// has the answer. Fields that came from auto-detection are labeled as
+// such; anything already saved on the client record is left alone.
 export default function SchemaGenerator({ clientId, client, bare = false }) {
   const router = useRouter()
   const [form, setForm] = useState({
@@ -24,15 +25,60 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
     same_as: (client.same_as || []).join('\n'),
     schema_type: client.schema_type || 'LocalBusiness'
   })
+  const [autoFilled, setAutoFilled] = useState({}) // { field: true } for fields filled from detection, not the saved record
   const [saving, setSaving] = useState(false)
-  const [generating, setGenerating] = useState(false)
+  const [loading, setLoading] = useState(true) // true during the initial auto-detect + preview fetch on mount
   const [error, setError] = useState(null)
-  const [result, setResult] = useState(null) // { jsonLd, scriptSnippet, missingFields, preview }
+  const [result, setResult] = useState(null) // { jsonLd, scriptSnippet, missingFields, suggested, preview }
+
   const [copied, setCopied] = useState(null) // 'json' | 'snippet' | null
 
   function update(field, value) {
     setForm(f => ({ ...f, [field]: value }))
+    setAutoFilled(a => ({ ...a, [field]: false })) // a manual edit un-labels it as auto-detected
   }
+
+  async function fetchGenerated() {
+    const res = await fetch(`/api/clients/${clientId}/schema`)
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'Could not generate schema')
+    return data
+  }
+
+  // Runs once on mount -- this is what makes the panel show up already
+  // populated and previewed, instead of an empty form waiting to be typed
+  // into. Re-fetches suggestions every time the panel mounts (e.g. after a
+  // save triggers router.refresh()) so a since-updated live homepage keeps
+  // contributing fresh hints for whatever's still blank.
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    fetchGenerated()
+      .then(data => {
+        if (cancelled) return
+        const suggested = data.suggested || {}
+        if (Object.keys(suggested).length > 0) {
+          setForm(f => ({
+            ...f,
+            street_address: f.street_address || suggested.street_address || f.street_address,
+            postal_code: f.postal_code || suggested.postal_code || f.postal_code,
+            phone: f.phone || suggested.phone || f.phone,
+            same_as: f.same_as || (suggested.same_as ? suggested.same_as.join('\n') : f.same_as)
+          }))
+          setAutoFilled({
+            street_address: !!suggested.street_address,
+            postal_code: !!suggested.postal_code,
+            phone: !!suggested.phone,
+            same_as: !!suggested.same_as
+          })
+        }
+        setResult(data)
+      })
+      .catch(err => !cancelled && setError(err.message))
+      .finally(() => !cancelled && setLoading(false))
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId])
 
   async function saveDetails() {
     setSaving(true)
@@ -52,30 +98,13 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Save failed')
+      const generated = await fetchGenerated()
+      setResult(generated)
       router.refresh()
-      return true
     } catch (err) {
       setError(err.message)
-      return false
     } finally {
       setSaving(false)
-    }
-  }
-
-  async function generate() {
-    setGenerating(true)
-    setError(null)
-    try {
-      const savedOk = await saveDetails()
-      if (!savedOk) return
-      const res = await fetch(`/api/clients/${clientId}/schema`)
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Could not generate schema')
-      setResult(data)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setGenerating(false)
     }
   }
 
@@ -95,6 +124,8 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
     URL.revokeObjectURL(url)
   }
 
+  const hasAnyAutoFilled = Object.values(autoFilled).some(Boolean)
+
   return (
     <div className={bare ? undefined : 'card'} style={bare ? undefined : { padding: 18 }}>
       <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Schema Generator</div>
@@ -103,18 +134,27 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
         facts -- ready to hand to a developer or paste in yourself.
       </p>
 
+      {loading && (
+        <p className="text-small text-muted" style={{ margin: '0 0 14px' }}>Checking the live site for existing contact details...</p>
+      )}
+      {!loading && hasAnyAutoFilled && (
+        <p className="text-tiny" style={{ margin: '0 0 14px', color: 'var(--grade-a)' }}>
+          Auto-detected from {client.url} -- review below, then save. Fields marked (auto) came from the live site, not typed in.
+        </p>
+      )}
+
       <div style={{ display: 'grid', gap: 12, marginBottom: 14 }}>
         <div>
-          <label className="field-label">Street address</label>
+          <label className="field-label">Street address{autoFilled.street_address && ' (auto)'}</label>
           <input className="field-input" style={{ marginBottom: 0 }} value={form.street_address} onChange={e => update('street_address', e.target.value)} placeholder="123 Main St" />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div>
-            <label className="field-label">Postal code</label>
+            <label className="field-label">Postal code{autoFilled.postal_code && ' (auto)'}</label>
             <input className="field-input" style={{ marginBottom: 0 }} value={form.postal_code} onChange={e => update('postal_code', e.target.value)} placeholder="80202" />
           </div>
           <div>
-            <label className="field-label">Phone</label>
+            <label className="field-label">Phone{autoFilled.phone && ' (auto)'}</label>
             <input className="field-input" style={{ marginBottom: 0 }} value={form.phone} onChange={e => update('phone', e.target.value)} placeholder="(303) 555-0100" />
           </div>
         </div>
@@ -123,7 +163,7 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
           <input className="field-input" style={{ marginBottom: 0 }} value={form.description} onChange={e => update('description', e.target.value)} placeholder="What this business does, in its own words." />
         </div>
         <div>
-          <label className="field-label">sameAs links (one per line -- Google Business Profile, LinkedIn, Facebook, etc.)</label>
+          <label className="field-label">sameAs links{autoFilled.same_as && ' (auto)'} -- one per line (Google Business Profile, LinkedIn, Facebook, etc.)</label>
           <textarea
             className="field-input"
             style={{ marginBottom: 0, minHeight: 70, fontFamily: 'monospace', fontSize: 12.5 }}
@@ -135,14 +175,14 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
       </div>
 
       <div style={{ display: 'flex', gap: 10 }}>
-        <button onClick={generate} disabled={generating || saving} className="btn btn-primary">
-          {generating ? 'Generating...' : 'Save details & generate schema'}
+        <button onClick={saveDetails} disabled={saving || loading} className="btn btn-primary">
+          {saving ? 'Saving...' : 'Save details & generate schema'}
         </button>
       </div>
 
       {error && <p className="field-error" style={{ marginTop: 12 }}>{error}</p>}
 
-      {result && (
+      {result && !loading && (
         <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <div
