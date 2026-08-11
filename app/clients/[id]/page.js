@@ -138,11 +138,31 @@ function AiVisibilityVerify({ raw, snapshot }) {
                     &ldquo;{r.responseSnippet}{r.responseSnippet.length >= 400 ? '…' : ''}&rdquo;
                   </p>
                 )}
-                {Array.isArray(r.sourceUrls) && r.sourceUrls.length > 0 && (
-                  <p className="text-tiny text-muted" style={{ margin: '4px 0 0', wordBreak: 'break-all' }}>
-                    Sources: {r.sourceUrls.join(', ')}
+                {/* Own-domain citations and everything-else are shown and
+                    labeled separately -- lumping them together as one plain
+                    "Sources:" line made it look like competitor/directory
+                    URLs (interodigital.com, semrush's agency directory,
+                    etc.) were citing this business, when really they're
+                    just what the engine cited FOR THIS ANSWER, most of
+                    which has nothing to do with this business at all. */}
+                {Array.isArray(r.ownDomainSourceUrls) && r.ownDomainSourceUrls.length > 0 && (
+                  <p className="text-tiny" style={{ margin: '4px 0 0', color: 'var(--grade-a)', wordBreak: 'break-all' }}>
+                    ✓ Cited from your own domain: {r.ownDomainSourceUrls.join(', ')}
                   </p>
                 )}
+                {(() => {
+                  const own = Array.isArray(r.ownDomainSourceUrls) ? r.ownDomainSourceUrls : []
+                  const otherSources = (Array.isArray(r.sourceUrls) ? r.sourceUrls : []).filter(u => !own.includes(u))
+                  if (otherSources.length === 0) return null
+                  return (
+                    <p className="text-tiny text-muted" style={{ margin: '4px 0 0', wordBreak: 'break-all' }}>
+                      {r.mentioned
+                        ? 'Other sources in this answer (not your domain, for context only): '
+                        : 'Not your domain -- this is who/what the engine cited instead: '}
+                      {otherSources.join(', ')}
+                    </p>
+                  )
+                })()}
               </>
             )}
           </div>
