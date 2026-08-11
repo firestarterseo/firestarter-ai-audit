@@ -301,3 +301,18 @@ p, span, div, label, input, select, textarea, button {
 }
 
 .evidence-list li { margin-bottom: 3px; }
+
+/* ---------- Loading spinner (audit-running overlay) ---------- */
+
+.audit-spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 4px solid var(--border);
+  border-top-color: var(--orange);
+  animation: audit-spin 0.8s linear infinite;
+}
+
+@keyframes audit-spin {
+  to { transform: rotate(360deg); }
+}

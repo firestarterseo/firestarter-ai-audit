@@ -38,15 +38,35 @@ export default function RunAuditButton({ clientId }) {
 
   return (
     <div>
-      <button onClick={onClick} disabled={running} className="btn btn-primary">
+      <button onClick={onClick} disabled={running} className="btn btn-primary" style={{ minWidth: 160 }}>
         {running ? 'Running audit...' : 'Run audit now'}
       </button>
+      {error && <p className="field-error" style={{ marginTop: 8, textAlign: 'right', maxWidth: 260 }}>{error}</p>}
+
       {running && (
-        <p className="text-tiny text-muted" style={{ marginTop: 6, marginBottom: 0, textAlign: 'right' }}>
-          Hits the live site + Cloro (5 AI engines), usually 30-60s, occasionally up to ~2min
-        </p>
+        // A full-screen dimmed overlay instead of a growing caption under
+        // the button -- that caption used to widen the right-aligned
+        // button's own flex container as its text wrapped, visibly
+        // shoving the button left the instant a run started. This also
+        // deliberately doesn't narrate exactly what's happening step by
+        // step (fetching page, calling engine 3 of 5, etc.) -- just that
+        // something is running and roughly how long it takes.
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(29, 21, 37, 0.55)', backdropFilter: 'blur(2px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}
+        >
+          <div className="card" style={{ padding: '32px 40px', textAlign: 'center', maxWidth: 320 }}>
+            <div className="audit-spinner" style={{ margin: '0 auto 18px' }} />
+            <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Running audit&hellip;</div>
+            <p className="text-small text-muted" style={{ margin: 0 }}>
+              Usually under a minute, occasionally up to two. This page will update automatically when it's done.
+            </p>
+          </div>
+        </div>
       )}
-      {error && <p className="field-error" style={{ marginTop: 8, textAlign: 'right' }}>{error}</p>}
     </div>
   )
 }

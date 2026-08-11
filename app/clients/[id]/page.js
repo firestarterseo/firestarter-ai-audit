@@ -2,6 +2,7 @@ import { getClientWithRuns } from '../../../lib/data'
 import RunAuditButton from './RunAuditButton'
 import PromptTester from './PromptTester'
 import TestPromptsManager from './TestPromptsManager'
+import ClientActions from './ClientActions'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +30,36 @@ function gradeClass(grade) {
   if (grade.startsWith('C')) return 'grade-c'
   if (grade.startsWith('D')) return 'grade-d'
   return 'grade-f'
+}
+
+const CHECK_ICON = { pass: '✓', partial: '✗', fail: '✗', not_verified: '–' }
+const CHECK_COLOR = { pass: 'var(--grade-a)', partial: 'var(--grade-d)', fail: 'var(--grade-f)', not_verified: 'var(--grade-none)' }
+
+// A row of small pass/fail chips under each pillar's finding text -- the
+// concrete sub-checks that actually ran, not just a single grade letter.
+// "not_verified" (grey dash) is deliberately distinct from "fail" (red x):
+// a missing API key isn't the same thing as a site actually failing a
+// check, and shouldn't look like one.
+function CheckRow({ checks }) {
+  if (!Array.isArray(checks) || checks.length === 0) return null
+  return (
+    <div style={{ display: 'grid', gap: 5, margin: '10px 0' }}>
+      {checks.map((c, i) => (
+        <div key={i} className="text-small" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 16, height: 16, borderRadius: '50%', fontSize: 10, fontWeight: 700, flexShrink: 0,
+            background: CHECK_COLOR[c.status] || 'var(--grade-none)', color: '#fff', lineHeight: 1
+          }}>
+            {CHECK_ICON[c.status] || '–'}
+          </span>
+          <span className={c.status === 'not_verified' ? 'text-muted' : undefined}>
+            {c.label}{c.status === 'not_verified' ? ' -- not verified' : ''}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function PillarCard({ pillarKey, pillar, children }) {
@@ -67,11 +98,17 @@ function PillarCard({ pillarKey, pillar, children }) {
             </span>
           )}
           {pillar.snapshot && (
-            <span className="pill pill-snapshot">snapshot, not tracked</span>
+            <span
+              className="pill pill-snapshot"
+              title="A one-off live check run right now, not a recurring measurement. Only 'tracked' clients build up real history over time via the weekly cron job -- a 'lead' always gets a fresh snapshot instead, each audit."
+            >
+              snapshot, not tracked
+            </span>
           )}
         </div>
       </div>
       {pillar.finding && <p style={{ fontSize: 14, margin: '6px 0' }}>{pillar.finding}</p>}
+      <CheckRow checks={pillar.checks} />
       {pillar.recommendation && (
         <p className="text-small" style={{ margin: '6px 0', color: 'var(--text)' }}>
           <b>Recommendation:</b> {pillar.recommendation}
@@ -107,8 +144,9 @@ export default async function ClientDetailPage({ params }) {
         <span className={`pill ${client.status === 'tracked' ? 'pill-tracked' : 'pill-lead'}`}>
           {client.status}
         </span>
-        <div style={{ marginLeft: 'auto' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
           <RunAuditButton clientId={client.id} />
+          <ClientActions clientId={client.id} status={client.status} />
         </div>
       </div>
 
