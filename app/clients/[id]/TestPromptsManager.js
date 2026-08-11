@@ -16,6 +16,7 @@ export default function TestPromptsManager({ clientId, savedPrompts, bare = fals
   // full candidate+saved pool with a checked/unchecked selection.
   const [pool, setPool] = useState(null)
   const [customInput, setCustomInput] = useState('')
+  const [usedAhrefs, setUsedAhrefs] = useState(null)
 
   const saved = savedPrompts || []
   const isConfirmed = saved.length > 0
@@ -29,6 +30,7 @@ export default function TestPromptsManager({ clientId, savedPrompts, bare = fals
       if (!res.ok) throw new Error(data.error || 'Could not load suggestions')
       const combined = Array.from(new Set([...saved, ...data.candidates]))
       setPool(combined.map(text => ({ text, checked: saved.includes(text) || saved.length === 0 })))
+      setUsedAhrefs(!!data.usedAhrefs)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -103,6 +105,13 @@ export default function TestPromptsManager({ clientId, savedPrompts, bare = fals
 
       {pool && (
         <div>
+          {usedAhrefs != null && (
+            <p className="text-tiny text-muted" style={{ margin: '0 0 10px' }}>
+              {usedAhrefs
+                ? 'Top suggestions are real keywords this domain already ranks for (via Ahrefs), sorted by search volume -- not a guess.'
+                : 'No Ahrefs ranking data found for this domain yet -- suggestions fall back to the site’s own title/description text and a schema-based guess.'}
+            </p>
+          )}
           <div style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
             {pool.map(item => (
               <label key={item.text} className="text-small" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', background: 'var(--bg-alt)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>

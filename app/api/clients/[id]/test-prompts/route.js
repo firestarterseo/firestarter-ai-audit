@@ -1,10 +1,16 @@
 const { getSupabaseServerClient } = require('../../../../../lib/supabaseServer')
-const { extractBusinessProfile, generatePromptCandidates } = require('../../../../../lib/checkers/business-profile')
+const { extractBusinessProfile, generatePromptCandidates, enrichProfileWithAhrefs } = require('../../../../../lib/checkers/business-profile')
 
 const MIN_PROMPTS = 3
 const MAX_PROMPTS = 7
 
-// GET -> { candidates: string[], saved: string[] }
+// Ahrefs adds one more live network call on top of the homepage fetch --
+// generous but bounded, same reasoning as the other live-data routes in
+// this project (see app/api/clients/[id]/audit/route.js's maxDuration
+// comment).
+const maxDuration = 30
+
+// GET -> { candidates: string[], saved: string[], usedAhrefs: boolean }
 // Fetches the live homepage fresh (same as a real audit would) so
 // suggestions reflect the site as it is right now, not a stale profile.
 async function GET(request, { params }) {
@@ -29,9 +35,16 @@ async function GET(request, { params }) {
     region: client.region,
     category: client.category
   })
-  const candidates = generatePromptCandidates(profile)
+  // Ahrefs-first when AHREFS_API_KEY is configured -- real, ranking- and
+  // volume-validated terms this domain already earns traffic from, ahead
+  // of anything guessed from title/meta/schema type. Falls through to
+  // those on its own (see business-profile.js) if there's no key yet, or
+  // this domain has no organic rankings at all (e.g. a brand-new lead).
+  const enriched = await enrichProfileWithAhrefs(profile, { apiKey: process.env.AHREFS_API_KEY })
+  const candidates = generatePromptCandidates(enriched)
+  const usedAhrefs = Array.isArray(enriched?.ahrefsTerms) && enriched.ahrefsTerms.length > 0
 
-  return Response.json({ candidates, saved: client.test_prompts || [], min: MIN_PROMPTS, max: MAX_PROMPTS })
+  return Response.json({ candidates, saved: client.test_prompts || [], min: MIN_PROMPTS, max: MAX_PROMPTS, usedAhrefs })
 }
 
 // POST { prompts: string[] } -> replaces the client's confirmed test-prompt
@@ -61,4 +74,4 @@ async function POST(request, { params }) {
   return Response.json({ test_prompts: data.test_prompts })
 }
 
-module.exports = { GET, POST, MIN_PROMPTS, MAX_PROMPTS }
+module.exports = { GET, POST, MIN_PROMPTS, MAX_PROMPTS, maxDuration }
