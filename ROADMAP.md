@@ -1,9 +1,9 @@
 # Firestarter AI Audit — Purpose & Roadmap
 
-_Last reviewed: 2026-08-11 (updated same day after the user shared the
-original planning doc `aireadyroadmap 2.html` and the original 85-client
-baseline spreadsheet `AI Audits 3.xlsx` -- this file now reconciles this
-build against that original plan rather than existing independently of it.)_
+_Last reviewed: 2026-08-12 (2026-08-11: reconciled against the original
+planning doc `aireadyroadmap 2.html` and the original 85-client baseline
+spreadsheet `AI Audits 3.xlsx`. 2026-08-12: WP plugin publish path built
+and confirmed live on firestarterseo.com.)_
 
 ## Where this came from
 
@@ -102,14 +102,25 @@ original plan" below.
   different pipeline from the internal dashboard (which never touches
   ActiveCampaign) so a client re-checking their own score never re-enters
   the sales funnel.
-- **Schema Generator WP plugin delivery path.** The generator core and the
-  manual download/snippet path are **built** (2026-08-11) -- see below.
-  Still outstanding: the WP plugin path (auto-install, renders sitewide,
-  doubles as the Schema pillar's live verification source) and Article/
-  BreadcrumbList generation, which need real per-page CMS context this
-  tool doesn't have from a single fetched homepage. Also still open: an
-  Asana task per manual-delivery client ("exact file, exact placement") --
-  blocked on the same Asana workspace issue below.
+- **Schema Generator WP plugin delivery path.** The generator core, the
+  manual download/snippet path, AND the WP plugin auto-publish path are all
+  **built and verified live** (2026-08-12) -- a small companion plugin
+  (wordpress-plugin/firestarter-ai-schema, installed once per client site)
+  authenticated via WordPress's native Application Passwords, plus a
+  one-click "Publish to WordPress" button in the tool. Confirmed working
+  end-to-end on firestarterseo.com itself: connect -> publish -> live,
+  valid LocalBusiness JSON-LD actually rendering in the page's <head>,
+  verified via view-source. Two real bugs found and fixed during this test
+  (v1.0.1): the plugin's status endpoint had no cache-control headers, so
+  an intermediate cache could serve a stale "not published" response right
+  after a real successful publish; and a timestamp bug showed "last
+  updated" several hours off from "last published" (UTC vs. local-time
+  parsing, not an actual data problem). Also doubles as the Schema pillar's
+  live verification source per the original plan, via the plugin's public
+  /status endpoint. Still outstanding: Article/BreadcrumbList generation,
+  which needs real per-page CMS context this tool doesn't have from a
+  single fetched homepage, and an Asana task per manual-delivery (non-WP)
+  client -- blocked on the same Asana workspace issue below.
 - **Content & outreach pipeline.** Planned Phase 4 in the original doc --
   auto-researched blog topics/drafts and citation/PR outreach, handed to a
   human via Asana starting at "review, fact-check, and publish," not

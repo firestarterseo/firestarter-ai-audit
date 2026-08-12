@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { BUSINESS_ENTITY_TYPES } from '../../../lib/businessEntityTypes'
 
 // The Schema Generator UI -- see lib/schemaGenerator.js and ROADMAP.md for
 // why this exists (83/85 clients in the old baseline spreadsheet had a
@@ -162,7 +163,12 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
             postal_code: f.postal_code || suggested.postal_code || f.postal_code,
             phone: f.phone || suggested.phone || f.phone,
             description: f.description || suggested.description || f.description,
-            same_as: f.same_as || (suggested.same_as ? suggested.same_as.join('\n') : f.same_as)
+            same_as: f.same_as || (suggested.same_as ? suggested.same_as.join('\n') : f.same_as),
+            // schema_type only ever arrives in `suggested` when the client was
+            // still sitting at the DB default ('LocalBusiness') -- see
+            // lib/schemaGenerator.js -- so it's always safe to apply here
+            // without a form.schema_type-is-blank check like the others.
+            schema_type: suggested.schema_type || f.schema_type
           }))
           setAutoFilled({
             street_address: !!suggested.street_address,
@@ -171,7 +177,8 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
             postal_code: !!suggested.postal_code,
             phone: !!suggested.phone,
             description: !!suggested.description,
-            same_as: !!suggested.same_as
+            same_as: !!suggested.same_as,
+            schema_type: !!suggested.schema_type
           })
         }
         setResult(data)
@@ -248,6 +255,25 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
       )}
 
       <div style={{ display: 'grid', gap: 12, marginBottom: 14 }}>
+        <div>
+          <label className="field-label">
+            Business type{autoFilled.schema_type && ' (auto -- detected from the site\'s existing schema or category, review before saving)'}
+          </label>
+          <select
+            className="field-input"
+            style={{ marginBottom: 0 }}
+            value={form.schema_type}
+            onChange={e => update('schema_type', e.target.value)}
+          >
+            {BUSINESS_ENTITY_TYPES.map(type => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+          <p className="text-tiny text-muted" style={{ margin: '4px 0 0' }}>
+            A more specific type than the default "LocalBusiness" (e.g. AccountingService, Attorney, Dentist) doesn't change this
+            pillar's own score, but it's more accurate and unlocks more of Google's rich-result features for this industry.
+          </p>
+        </div>
         <div>
           <label className="field-label">Street address{autoFilled.street_address && ' (auto)'}</label>
           <input className="field-input" style={{ marginBottom: 0 }} value={form.street_address} onChange={e => update('street_address', e.target.value)} placeholder="123 Main St" />
