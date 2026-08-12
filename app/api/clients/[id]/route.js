@@ -1,12 +1,13 @@
-const { getClientWithRuns } = require('../../../../lib/data')
+const { getClientWithRuns, sanitizeClient } = require('../../../../lib/data')
 const { getSupabaseServerClient } = require('../../../../lib/supabaseServer')
 const { resolveSchemaType } = require('../../../../lib/schemaGenerator')
+const { encrypt } = require('../../../../lib/wpCredentials')
 
 async function GET(request, { params }) {
   try {
     const { id } = await params
     const result = await getClientWithRuns(id)
-    return Response.json(result)
+    return Response.json({ ...result, client: sanitizeClient(result.client) })
   } catch (err) {
     return Response.json({ error: err.message }, { status: 404 })
   }
@@ -60,6 +61,30 @@ async function PATCH(request, { params }) {
     update.schema_type = resolveSchemaType({ schema_type: body.schema_type })
   }
 
+  // WordPress connection -- see lib/wpCredentials.js and the publish route
+  // (schema/publish/route.js). wp_username is stored as plain text (just an
+  // identifier); wp_app_password is a real site credential (a WordPress
+  // Application Password) and is encrypted before it ever touches the
+  // database. Sending an empty wp_app_password disconnects the site
+  // (clears both the username and the stored credential) rather than
+  // silently keeping a stale one around with nothing to pair it with.
+  if ('wp_username' in body || 'wp_app_password' in body) {
+    const appPassword = typeof body.wp_app_password === 'string' ? body.wp_app_password.trim() : ''
+    if (!appPassword) {
+      update.wp_username = null
+      update.wp_app_password_encrypted = null
+      update.wp_connected_at = null
+    } else {
+      const username = typeof body.wp_username === 'string' ? body.wp_username.trim() : ''
+      if (!username) {
+        return Response.json({ error: 'wp_username is required when setting a WordPress Application Password.' }, { status: 400 })
+      }
+      update.wp_username = username
+      update.wp_app_password_encrypted = encrypt(appPassword)
+      update.wp_connected_at = new Date().toISOString()
+    }
+  }
+
   const supabase = getSupabaseServerClient()
   const { data, error } = await supabase
     .from('clients')
@@ -69,7 +94,7 @@ async function PATCH(request, { params }) {
     .single()
   if (error) return Response.json({ error: error.message }, { status: 500 })
 
-  return Response.json({ client: data })
+  return Response.json({ client: sanitizeClient(data) })
 }
 
 // DELETE -- permanently removes the client and, via the DB's own

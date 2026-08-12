@@ -1,4 +1,4 @@
-import { getClientWithRuns } from '../../../lib/data'
+import { getClientWithRuns, sanitizeClient } from '../../../lib/data'
 import RunAuditButton from './RunAuditButton'
 import PromptTester from './PromptTester'
 import TestPromptsManager from './TestPromptsManager'
@@ -304,7 +304,11 @@ export default async function ClientDetailPage({ params }) {
             )}
             {key === 'schema_structure' && (
               <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-                <SchemaGenerator clientId={client.id} client={client} bare />
+                {/* sanitizeClient strips the encrypted WordPress credential --
+                    see lib/data.js -- before this crosses into a Client
+                    Component's props. Only `wp_connected` (a boolean) needs
+                    to reach the browser. */}
+                <SchemaGenerator clientId={client.id} client={sanitizeClient(client)} bare />
               </div>
             )}
           </PillarCard>

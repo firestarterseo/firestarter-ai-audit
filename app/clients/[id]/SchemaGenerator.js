@@ -36,6 +36,99 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
 
   const [copied, setCopied] = useState(null) // 'json' | 'snippet' | null
 
+  // WordPress connect + publish -- see lib/wpPublish.js and the
+  // wordpress-plugin/ companion plugin. wpForm never gets pre-filled from
+  // `client` -- the Application Password is write-only from this tool's
+  // point of view (see sanitizeClient in lib/data.js, which strips even the
+  // encrypted value before it reaches this component), so there's nothing
+  // to pre-fill even when already connected.
+  const [wpForm, setWpForm] = useState({ wp_username: client.wp_username || '', wp_app_password: '' })
+  const [wpConnected, setWpConnected] = useState(!!client.wp_connected)
+  const [wpConnecting, setWpConnecting] = useState(false)
+  const [wpPublishing, setWpPublishing] = useState(false)
+  const [wpChecking, setWpChecking] = useState(false)
+  const [wpMessage, setWpMessage] = useState(null) // { ok: boolean, text: string }
+
+  async function connectWordPress() {
+    setWpConnecting(true)
+    setWpMessage(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wp_username: wpForm.wp_username, wp_app_password: wpForm.wp_app_password })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Could not connect')
+      setWpConnected(true)
+      setWpForm(f => ({ ...f, wp_app_password: '' })) // never keep the token in memory longer than the one request that sent it
+      setWpMessage({ ok: true, text: 'Connected. You can publish schema to this site now.' })
+      router.refresh()
+    } catch (err) {
+      setWpMessage({ ok: false, text: err.message })
+    } finally {
+      setWpConnecting(false)
+    }
+  }
+
+  async function disconnectWordPress() {
+    setWpConnecting(true)
+    setWpMessage(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wp_username: '', wp_app_password: '' })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Could not disconnect')
+      setWpConnected(false)
+      setWpForm({ wp_username: '', wp_app_password: '' })
+      setWpMessage(null)
+      router.refresh()
+    } catch (err) {
+      setWpMessage({ ok: false, text: err.message })
+    } finally {
+      setWpConnecting(false)
+    }
+  }
+
+  async function publishToWordPress() {
+    setWpPublishing(true)
+    setWpMessage(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/schema/publish`, { method: 'POST' })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.error || 'Publish failed')
+      setWpMessage({ ok: true, text: `Published${data.updatedAt ? ` at ${new Date(data.updatedAt).toLocaleString()}` : ''}.` })
+      router.refresh()
+    } catch (err) {
+      setWpMessage({ ok: false, text: err.message })
+    } finally {
+      setWpPublishing(false)
+    }
+  }
+
+  async function checkWordPressStatus() {
+    setWpChecking(true)
+    setWpMessage(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/schema/status`)
+      const data = await res.json()
+      if (!data.connected) throw new Error(data.error || 'Could not reach the site')
+      setWpMessage({
+        ok: true,
+        text: data.hasSchema
+          ? `Live on the site${data.updatedAt ? ` -- last updated ${new Date(data.updatedAt).toLocaleString()}` : ''}.`
+          : 'The plugin is reachable, but no schema has been published yet.'
+      })
+    } catch (err) {
+      setWpMessage({ ok: false, text: err.message })
+    } finally {
+      setWpChecking(false)
+    }
+  }
+
   function update(field, value) {
     setForm(f => ({ ...f, [field]: value }))
     setAutoFilled(a => ({ ...a, [field]: false })) // a manual edit un-labels it as auto-detected
@@ -245,6 +338,74 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
             <button className="btn btn-secondary" onClick={() => download(result.scriptSnippet, `${clientId}-schema-snippet.html`)}>
               Download snippet (.html)
             </button>
+          </div>
+
+          <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Publish to WordPress</div>
+            <p className="text-small text-muted" style={{ margin: '0 0 12px' }}>
+              For sites this tool can auto-update instead of pasting a snippet by hand: install the{' '}
+              <a href="/firestarter-ai-schema.zip" download>Firestarter AI Schema plugin</a> once (Plugins &rarr; Add New &rarr; Upload
+              Plugin), then generate an Application Password from that site's Users &rarr; Profile &rarr; Application Passwords screen
+              and connect it below.
+            </p>
+
+            {!wpConnected ? (
+              <div style={{ display: 'grid', gap: 10, maxWidth: 420 }}>
+                <div>
+                  <label className="field-label">WordPress username</label>
+                  <input
+                    className="field-input"
+                    style={{ marginBottom: 0 }}
+                    value={wpForm.wp_username}
+                    onChange={e => setWpForm(f => ({ ...f, wp_username: e.target.value }))}
+                    placeholder="admin"
+                  />
+                </div>
+                <div>
+                  <label className="field-label">Application Password</label>
+                  <input
+                    type="password"
+                    className="field-input"
+                    style={{ marginBottom: 0 }}
+                    value={wpForm.wp_app_password}
+                    onChange={e => setWpForm(f => ({ ...f, wp_app_password: e.target.value }))}
+                    placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"
+                    autoComplete="new-password"
+                  />
+                </div>
+                <div>
+                  <button
+                    className="btn btn-primary"
+                    disabled={wpConnecting || !wpForm.wp_username || !wpForm.wp_app_password}
+                    onClick={connectWordPress}
+                  >
+                    {wpConnecting ? 'Connecting...' : 'Connect WordPress'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span className="pill pill-tracked">Connected as {client.wp_username || wpForm.wp_username}</span>
+                <button className="btn btn-primary" disabled={wpPublishing} onClick={publishToWordPress}>
+                  {wpPublishing ? 'Publishing...' : 'Publish to WordPress'}
+                </button>
+                <button className="btn btn-secondary" disabled={wpChecking} onClick={checkWordPressStatus}>
+                  {wpChecking ? 'Checking...' : 'Check live status'}
+                </button>
+                <button className="btn btn-secondary" disabled={wpConnecting} onClick={disconnectWordPress}>
+                  Disconnect
+                </button>
+                {client.wp_last_published_at && (
+                  <span className="text-tiny text-muted">Last published {new Date(client.wp_last_published_at).toLocaleString()}</span>
+                )}
+              </div>
+            )}
+
+            {wpMessage && (
+              <p className={wpMessage.ok ? 'text-small' : 'field-error'} style={{ marginTop: 10, color: wpMessage.ok ? 'var(--grade-a)' : undefined }}>
+                {wpMessage.text}
+              </p>
+            )}
           </div>
         </div>
       )}
