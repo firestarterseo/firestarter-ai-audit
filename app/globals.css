@@ -191,6 +191,82 @@ p, span, div, label, input, select, textarea, button {
   border-radius: var(--radius);
 }
 
+/* ---------- Overall score + pillar tiles (dashboard view) ---------- */
+
+.overall-tile {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 20px 24px;
+  margin-bottom: 14px;
+}
+
+.pillar-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.pillar-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  font-family: inherit;
+}
+
+.pillar-tile:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.pillar-tile.expanded {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.pillar-tile-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pillar-tile-chevron {
+  margin-left: auto;
+  color: var(--muted-2);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.pillar-tile.expanded .pillar-tile-chevron {
+  transform: rotate(90deg);
+  color: var(--muted);
+}
+
+.pillar-tile-status {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
 .list-row {
   display: flex;
   align-items: center;
