@@ -1,9 +1,13 @@
 # Firestarter AI Audit — Purpose & Roadmap
 
-_Last reviewed: 2026-08-12 (2026-08-11: reconciled against the original
+_Last reviewed: 2026-08-13 (2026-08-11: reconciled against the original
 planning doc `aireadyroadmap 2.html` and the original 85-client baseline
 spreadsheet `AI Audits 3.xlsx`. 2026-08-12: WP plugin publish path built
-and confirmed live on firestarterseo.com.)_
+and confirmed live on firestarterseo.com. 2026-08-13: Competitive
+Position v1 built -- all five pillars now built; also reworked AI & GEO
+Visibility's citation scoring from a binary self-citation flag to a
+graduated tier that credits third-party mentions and best-list/authority-
+domain citations more heavily than a plain self-referral.)_
 
 ## Where this came from
 
@@ -47,7 +51,7 @@ unverified/not-yet-graded. Nothing is ever faked to fill in a gap.
 | Technical Foundation | **Built** | HTTPS/redirect, robots.txt + sitemap.xml, broken internal links, Core Web Vitals + Lighthouse category scores via PageSpeed Insights |
 | AI & GEO Visibility | **Built** | Real prompts (Ahrefs organic keywords first, then page title/meta, then guessed) queried live against ChatGPT/Gemini/Google/Perplexity via Cloro; mention/citation/sentiment, weighted by engine importance |
 | Content Authority | **Built** | Word count, content freshness, referring domains (Ahrefs backlinks-stats) |
-| Competitive Position | **Not built** | Benchmark against named competitors -- blocked on a design decision, not a data source (see below) |
+| Competitive Position | **Built (v1)** | AI-citation head-to-head (60pts) vs auto-detected competitors + Ahrefs organic-keyword-count standing (40pts); GBP ratings comparison deferred (see below) |
 
 Supporting infrastructure already in place: Ahrefs API (organic-keywords +
 backlinks-stats), PageSpeed Insights, Cloro (5→4 AI engines after dropping
@@ -77,23 +81,32 @@ original plan" below.
   `audit_runs`/`pillar_scores` (which are reserved for this tool's own real,
   verified runs -- mixing in guessed historical data there would break the
   "verify, don't guess" principle every pillar was built on).
-- **Competitive Position pillar.** The last of the five. Per the original
-  plan this is specifically three things: (1) real keyword rank tracking
-  against NAMED competitors (buildable now via Ahrefs organic-keywords for
-  each competitor domain), (2) a live "best X in [city]" check -- largely
-  overlaps what AI & GEO Visibility's `generatePrompts` already does, just
-  needs to specifically watch for a named competitor showing up instead of
-  the client, (3) Google Business Profile review/rating comparison -- a NEW
-  data source, not yet integrated. Confirmed feasible: Places API (New)
-  Place Details returns `rating`/`userRatingCount` for any public business
-  via a plain API key (same model as PageSpeed Insights, no OAuth/ownership
-  needed), but unlike PSI it requires billing enabled on the Google Cloud
-  project and is billed per request (~$20/1,000 after a monthly free-call
+- **Google Places/GBP ratings comparison for Competitive Position.**
+  Deferred from the pillar's v1 (built 2026-08-13, see the pillar table
+  above and `lib/checkers/competitive-position-checker.js`'s header for
+  the full locked-decisions writeup) pending the Places API application
+  and Google Cloud billing being set up on Skyler's own project (he
+  confirmed access to the project but hadn't submitted the GBP
+  application as of 2026-08-13). Confirmed feasible whenever that's
+  ready: Places API (New) Place Details returns `rating`/`userRatingCount`
+  for any public business via a plain API key (same model as PageSpeed
+  Insights, no OAuth/ownership needed), but unlike PSI it requires billing
+  enabled and is billed per request (~$20/1,000 after a monthly free-call
   allowance under the Enterprise SKU, as of the March 2025 pricing
-  restructure). Competitor identification: auto-derive from Ahrefs
-  competing-domains + AI-visibility "cited instead" data, with a
-  strategist able to review/override -- same pattern as the confirmed
-  test-prompts set.
+  restructure). The `client_competitors` table already has a reserved
+  (currently unused) `google_place_id` column for this. What v1 actually
+  shipped instead: an AI-citation head-to-head (60pts, reusing the same
+  confirmed AI-visibility test prompts/tracked runs already collected for
+  AI & GEO Visibility, no new Cloro cost) and an Ahrefs organic-keyword-
+  count standing (40pts, reusing the single Ahrefs organic-competitors
+  call already made during competitor auto-detection -- no second paid
+  call). Competitors are auto-detected on every audit from AI-citation
+  "cited instead" data and Ahrefs organic-competitors overlap
+  (`lib/competitorDetection.js`), stored in their own `client_competitors`
+  table, and grade as soon as 2+ are auto-detected -- manual confirmation
+  was explicitly rejected as a grading gate ("I don't want this excluded.
+  I want it to work") and is only ever optional polish (add/rename/
+  deactivate via the Competitive Position tile's competitor manager).
 - **Public lead-capture pipeline.** Per the original plan this is more
   specific than "a form somewhere": it replaces the existing embed at
   firestarterseo.com/ai-search/ai-audit/, grades via this tool's shared

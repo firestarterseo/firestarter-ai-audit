@@ -1,9 +1,10 @@
-import { getClientWithRuns, sanitizeClient } from '../../../lib/data'
+import { getClientWithRuns, getClientCompetitors, sanitizeClient } from '../../../lib/data'
 import RunAuditButton from './RunAuditButton'
 import PromptTester from './PromptTester'
 import TestPromptsManager from './TestPromptsManager'
 import ClientActions from './ClientActions'
 import SchemaGenerator from './SchemaGenerator'
+import CompetitorsManager from './CompetitorsManager'
 import PillarsBoard from './PillarsBoard'
 
 export const dynamic = 'force-dynamic'
@@ -18,12 +19,14 @@ const PILLAR_LABELS = {
 
 const PILLAR_ORDER = ['schema_structure', 'technical_foundation', 'ai_geo_visibility', 'content_authority', 'competitive_position']
 
-// Only Competitive Position is genuinely "not built" (blocked on a vendor
-// decision, see lib/runAudit.js header). Every other pillar just hasn't
-// been audited yet on a brand-new client -- those two states need
-// different messaging, and ai_geo_visibility additionally needs its setup
-// UI (children) available even before that first audit, not only after.
-const NOT_YET_BUILT = new Set(['competitive_position'])
+// As of 2026-08-13, Competitive Position is built (see
+// lib/checkers/competitive-position-checker.js) -- it just may not have
+// enough auto-detected competitors yet to grade, same "not yet graded"
+// empty-data contract every other pillar already uses (result.noData),
+// not a "this feature doesn't exist" state. Nothing belongs in this set
+// anymore, but it's kept (empty) rather than removed outright in case a
+// genuinely not-yet-built pillar shows up again later.
+const NOT_YET_BUILT = new Set([])
 
 function gradeClass(grade) {
   if (!grade) return 'grade-none'
@@ -103,6 +106,7 @@ function HistoryPanel({ runs }) {
 export default async function ClientDetailPage({ params }) {
   const { id } = await params
   const { client, runs } = await getClientWithRuns(id)
+  const competitors = await getClientCompetitors(id)
   const latestRun = runs[0] || null
   const pillarsByKey = new Map((latestRun?.pillars || []).map(p => [p.pillar, p]))
 
@@ -130,6 +134,11 @@ export default async function ClientDetailPage({ params }) {
                 Component's props. Only `wp_connected` (a boolean) needs
                 to reach the browser. */}
             <SchemaGenerator clientId={client.id} client={sanitizeClient(client)} bare />
+          </div>
+        )}
+        {key === 'competitive_position' && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+            <CompetitorsManager clientId={client.id} competitors={competitors} bare />
           </div>
         )}
       </>
