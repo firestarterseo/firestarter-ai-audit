@@ -1,5 +1,5 @@
 const { getSupabaseServerClient } = require('../../../../../lib/supabaseServer')
-const { isNonCompetitorDomain, hostnameOf } = require('../../../../../lib/nonCompetitorDomains')
+const { isNonCompetitorDomain, normalizeDomain } = require('../../../../../lib/nonCompetitorDomains')
 
 // Competitive Position competitors -- list, manually add, and
 // activate/deactivate/rename. Auto-detection itself (AI-citation +
@@ -9,18 +9,15 @@ const { isNonCompetitorDomain, hostnameOf } = require('../../../../../lib/nonCom
 // feedback ("If we want to manually put in competitors later we can"),
 // add a known competitor by hand at any time. Manual add/edit is always
 // optional polish here, never a gate on grading (see
-// lib/checkers/competitive-position-checker.js's header).
-
-function normalizeDomain(input) {
-  if (!input) return null
-  const trimmed = String(input).trim()
-  if (!trimmed) return null
-  // Accept either a bare domain ("rival.com") or a full URL
-  // ("https://www.rival.com/") -- either is a natural thing to paste in.
-  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
-  const host = hostnameOf(withProtocol)
-  return host || null
-}
+// lib/checkers/competitive-position-checker.js's header). normalizeDomain
+// (shared with lib/competitorDetection.js) accepts either a bare domain
+// ("rival.com") or a full URL ("https://www.rival.com/") -- either is a
+// natural thing to paste in -- and strips "www." consistently, which
+// matters here: client.domain is stored inconsistently across clients
+// (some with "www.", some without), so comparing it to a normalized
+// citation hostname without normalizing client.domain too would let a
+// client's own site slip through as a "different domain" (a real bug
+// found 2026-08-13).
 
 // GET -> { competitors: [...] } (both active and inactive -- the UI
 // itself decides what to show/hide, e.g. an "include deactivated"
@@ -57,7 +54,7 @@ async function POST(request, { params }) {
 
   const { data: client, error: clientError } = await supabase.from('clients').select('domain').eq('id', id).single()
   if (clientError) return Response.json({ error: clientError.message }, { status: 404 })
-  if (client.domain === domain) {
+  if (normalizeDomain(client.domain) === domain) {
     return Response.json({ error: 'That domain matches the client\'s own site -- a competitor has to be a different business.' }, { status: 400 })
   }
 

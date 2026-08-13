@@ -82,23 +82,29 @@ export default function CompetitorsManager({ clientId, competitors, bare = false
         <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
           {visible.map(c => (
             <div key={c.id} className="text-small" style={{
-              display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
-              background: 'var(--bg-alt)', borderRadius: 'var(--radius-sm)',
+              padding: '8px 10px', background: 'var(--bg-alt)', borderRadius: 'var(--radius-sm)',
               opacity: c.active === false ? 0.55 : 1
             }}>
-              <span style={{ fontWeight: 600 }}>{c.name || c.domain}</span>
-              {c.name && <span className="text-muted">({c.domain})</span>}
-              <span className="pill pill-lead" style={{ textTransform: 'none' }}>{SOURCE_LABEL[c.source] || c.source}</span>
-              {c.active === false && <span className="pill pill-lead">deactivated</span>}
-              <button
-                type="button"
-                onClick={() => toggleActive(c)}
-                disabled={busyId === c.id}
-                className="btn btn-secondary"
-                style={{ marginLeft: 'auto', padding: '4px 10px', fontSize: 12 }}
-              >
-                {busyId === c.id ? '...' : c.active === false ? 'Reactivate' : 'Deactivate'}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontWeight: 600 }}>{c.name || c.domain}</span>
+                {c.name && <span className="text-muted">({c.domain})</span>}
+                <span className="pill pill-lead" style={{ textTransform: 'none' }}>{SOURCE_LABEL[c.source] || c.source}</span>
+                {c.active === false && <span className="pill pill-lead">deactivated</span>}
+                <button
+                  type="button"
+                  onClick={() => toggleActive(c)}
+                  disabled={busyId === c.id}
+                  className="btn btn-secondary"
+                  style={{ marginLeft: 'auto', padding: '4px 10px', fontSize: 12 }}
+                >
+                  {busyId === c.id ? '...' : c.active === false ? 'Reactivate' : 'Deactivate'}
+                </button>
+              </div>
+              {c.detection_note && (
+                <p className="text-tiny text-muted" style={{ margin: '6px 0 0' }}>
+                  ⚠ {c.detection_note}
+                </p>
+              )}
             </div>
           ))}
         </div>
