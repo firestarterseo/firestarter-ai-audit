@@ -54,22 +54,17 @@ function HistoryRow({ run }) {
   )
 }
 
-const HISTORY_VISIBLE_COUNT = 5
-
 // `runs` is newest-first (see lib/data.js). The original (oldest) run's
 // grade and the current (newest) run's score are the two numbers that
 // actually answer "is this getting better," so they're surfaced as their
-// own tile rather than buried at the bottom of a long list. Below that,
-// only the most recent runs show by default -- the rest is a native
-// <details> disclosure away, same pattern already used for raw evidence
-// elsewhere on this page, rather than an ever-growing wall of rows for
-// clients tracked over months.
+// own tile up top. The full run-by-run list is entirely hidden by
+// default behind a single native <details> disclosure -- same pattern
+// already used for raw evidence elsewhere on this page -- rather than
+// showing some rows always and others behind a toggle.
 function HistoryPanel({ runs }) {
   if (!Array.isArray(runs) || runs.length < 2) return null
   const current = runs[0]
   const original = runs[runs.length - 1]
-  const visible = runs.slice(0, HISTORY_VISIBLE_COUNT)
-  const hidden = runs.slice(HISTORY_VISIBLE_COUNT)
 
   return (
     <div style={{ marginTop: 32 }}>
@@ -95,18 +90,12 @@ function HistoryPanel({ runs }) {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gap: 6 }}>
-        {visible.map(r => <HistoryRow key={r.id} run={r} />)}
-      </div>
-
-      {hidden.length > 0 && (
-        <details className="raw-details" style={{ marginTop: 10 }}>
-          <summary>Show full history ({hidden.length} more)</summary>
-          <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
-            {hidden.map(r => <HistoryRow key={r.id} run={r} />)}
-          </div>
-        </details>
-      )}
+      <details className="raw-details">
+        <summary>Show full history ({runs.length} runs)</summary>
+        <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+          {runs.map(r => <HistoryRow key={r.id} run={r} />)}
+        </div>
+      </details>
     </div>
   )
 }
