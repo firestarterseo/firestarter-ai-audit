@@ -8,9 +8,11 @@ import { useState } from 'react'
 // Generator + WordPress publish, AI-visibility test-prompt tools), that
 // all-expanded-all-the-time layout stopped being scannable. This shows a
 // compact tile per pillar (grade + one-line status) and expands the full
-// detail in place on click -- no navigation, no page reload, and multiple
-// pillars can stay open at once (e.g. Schema Generator while also
-// reviewing AI Visibility) rather than a strict one-at-a-time accordion.
+// detail in place on click -- no navigation, no page reload. Only one
+// pillar is expanded at a time (a single-open accordion): opening a
+// second tile closes whichever one was already open, so clicking
+// through several pillars doesn't just rebuild the same long scroll
+// this redesign replaced.
 //
 // `pillars` is plain data prepared server-side in page.js:
 //   [{ key, label, pillar, notYetBuilt, children }]
@@ -236,10 +238,15 @@ function PillarDetail({ pillarKey, label, pillar, notYetBuilt, children }) {
 }
 
 export default function PillarsBoard({ pillars, defaultExpanded = [] }) {
-  const [expanded, setExpanded] = useState(() => Object.fromEntries(defaultExpanded.map(k => [k, true])))
+  // Single-open accordion, not independent per-tile toggles: opening a
+  // second pillar closes whichever one was open. Per direct feedback --
+  // clicking through several tiles was leaving all of them expanded at
+  // once, back to the same long-scroll problem this redesign was meant to
+  // fix. `expandedKey` is the one open pillar's key, or null.
+  const [expandedKey, setExpandedKey] = useState(defaultExpanded[0] ?? null)
 
   function toggle(key) {
-    setExpanded(e => ({ ...e, [key]: !e[key] }))
+    setExpandedKey(k => (k === key ? null : key))
   }
 
   return (
@@ -249,9 +256,9 @@ export default function PillarsBoard({ pillars, defaultExpanded = [] }) {
           <button
             key={p.key}
             type="button"
-            className={`pillar-tile${expanded[p.key] ? ' expanded' : ''}`}
+            className={`pillar-tile${expandedKey === p.key ? ' expanded' : ''}`}
             onClick={() => toggle(p.key)}
-            aria-expanded={!!expanded[p.key]}
+            aria-expanded={expandedKey === p.key}
           >
             <div className="pillar-tile-top">
               <div className={`grade-badge ${gradeClass(p.pillar?.grade)}`} style={{ width: 30, height: 30, fontSize: 12 }}>
@@ -268,7 +275,7 @@ export default function PillarsBoard({ pillars, defaultExpanded = [] }) {
       </div>
 
       <div style={{ display: 'grid', gap: 12 }}>
-        {pillars.filter(p => expanded[p.key]).map(p => (
+        {pillars.filter(p => p.key === expandedKey).map(p => (
           <PillarDetail key={p.key} pillarKey={p.key} label={p.label} pillar={p.pillar} notYetBuilt={p.notYetBuilt}>
             {p.children}
           </PillarDetail>

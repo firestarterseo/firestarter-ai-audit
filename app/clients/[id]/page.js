@@ -34,6 +34,83 @@ function gradeClass(grade) {
   return 'grade-f'
 }
 
+function gradeColor(grade) {
+  if (grade?.startsWith('A')) return 'var(--grade-a)'
+  if (grade?.startsWith('B')) return 'var(--grade-b)'
+  if (grade?.startsWith('C')) return 'var(--grade-c)'
+  if (grade?.startsWith('D')) return 'var(--grade-d)'
+  return grade ? 'var(--grade-f)' : 'var(--grade-none)'
+}
+
+function HistoryRow({ run }) {
+  return (
+    <div className="card text-small" style={{ display: 'flex', gap: 12, padding: '10px 14px', color: 'var(--text)' }}>
+      <span>{new Date(run.run_at).toLocaleString()}</span>
+      <span className="text-muted">{run.trigger_source}</span>
+      <span style={{ marginLeft: 'auto', fontWeight: 600, color: gradeColor(run.overall_grade) }}>
+        {run.overall_grade || '--'}
+      </span>
+    </div>
+  )
+}
+
+const HISTORY_VISIBLE_COUNT = 5
+
+// `runs` is newest-first (see lib/data.js). The original (oldest) run's
+// grade and the current (newest) run's score are the two numbers that
+// actually answer "is this getting better," so they're surfaced as their
+// own tile rather than buried at the bottom of a long list. Below that,
+// only the most recent runs show by default -- the rest is a native
+// <details> disclosure away, same pattern already used for raw evidence
+// elsewhere on this page, rather than an ever-growing wall of rows for
+// clients tracked over months.
+function HistoryPanel({ runs }) {
+  if (!Array.isArray(runs) || runs.length < 2) return null
+  const current = runs[0]
+  const original = runs[runs.length - 1]
+  const visible = runs.slice(0, HISTORY_VISIBLE_COUNT)
+  const hidden = runs.slice(HISTORY_VISIBLE_COUNT)
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <div className="section-label">History</div>
+
+      <div className="overall-tile" style={{ marginBottom: 14 }}>
+        <div className={`grade-badge ${gradeClass(original.overall_grade)}`} style={{ width: 40, height: 40, fontSize: 16 }}>
+          {original.overall_grade || '--'}
+        </div>
+        <div>
+          <div className="text-tiny text-muted" style={{ fontWeight: 600, letterSpacing: 0.5 }}>ORIGINAL GRADE</div>
+          <div className="text-small text-muted">{new Date(original.run_at).toLocaleDateString()}</div>
+        </div>
+        <div style={{ fontSize: 20, color: 'var(--muted-2)' }}>&rarr;</div>
+        <div>
+          <div className="text-tiny text-muted" style={{ fontWeight: 600, letterSpacing: 0.5 }}>CURRENT SCORE</div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>
+            {current.overall_score ?? '--'} <span className="text-small text-muted" style={{ fontWeight: 400 }}>/ 100</span>
+          </div>
+        </div>
+        <div className={`grade-badge ${gradeClass(current.overall_grade)}`} style={{ width: 40, height: 40, fontSize: 16, marginLeft: 'auto' }}>
+          {current.overall_grade || '--'}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: 6 }}>
+        {visible.map(r => <HistoryRow key={r.id} run={r} />)}
+      </div>
+
+      {hidden.length > 0 && (
+        <details className="raw-details" style={{ marginTop: 10 }}>
+          <summary>Show full history ({hidden.length} more)</summary>
+          <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+            {hidden.map(r => <HistoryRow key={r.id} run={r} />)}
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
 export default async function ClientDetailPage({ params }) {
   const { id } = await params
   const { client, runs } = await getClientWithRuns(id)
@@ -112,31 +189,7 @@ export default async function ClientDetailPage({ params }) {
 
       <PillarsBoard pillars={pillars} />
 
-      {runs.length > 1 && (
-        <div style={{ marginTop: 32 }}>
-          <div className="section-label">History</div>
-          <div style={{ display: 'grid', gap: 6 }}>
-            {runs.map(r => (
-              <div key={r.id} className="card text-small" style={{ display: 'flex', gap: 12, padding: '10px 14px', color: 'var(--text)' }}>
-                <span>{new Date(r.run_at).toLocaleString()}</span>
-                <span className="text-muted">{r.trigger_source}</span>
-                <span style={{
-                  marginLeft: 'auto',
-                  fontWeight: 600,
-                  color:
-                    r.overall_grade?.startsWith('A') ? 'var(--grade-a)' :
-                    r.overall_grade?.startsWith('B') ? 'var(--grade-b)' :
-                    r.overall_grade?.startsWith('C') ? 'var(--grade-c)' :
-                    r.overall_grade?.startsWith('D') ? 'var(--grade-d)' :
-                    r.overall_grade ? 'var(--grade-f)' : 'var(--grade-none)'
-                }}>
-                  {r.overall_grade || '--'}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <HistoryPanel runs={runs} />
     </div>
   )
 }
