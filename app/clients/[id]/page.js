@@ -1,4 +1,4 @@
-import { getClientWithRuns, getClientCompetitors, sanitizeClient } from '../../../lib/data'
+import { getClientWithRuns, getClientCompetitors, getClientOpportunities, sanitizeClient } from '../../../lib/data'
 import { normalizeDomain } from '../../../lib/nonCompetitorDomains'
 import RunAuditButton from './RunAuditButton'
 import PromptTester from './PromptTester'
@@ -6,6 +6,7 @@ import TestPromptsManager from './TestPromptsManager'
 import ClientActions from './ClientActions'
 import SchemaGenerator from './SchemaGenerator'
 import CompetitorsManager from './CompetitorsManager'
+import OpportunitiesManager from './OpportunitiesManager'
 import PillarsBoard from './PillarsBoard'
 
 export const dynamic = 'force-dynamic'
@@ -108,6 +109,7 @@ export default async function ClientDetailPage({ params }) {
   const { id } = await params
   const { client, runs } = await getClientWithRuns(id)
   const competitors = await getClientCompetitors(id)
+  const opportunities = await getClientOpportunities(id)
   const latestRun = runs[0] || null
   const pillarsByKey = new Map((latestRun?.pillars || []).map(p => [p.pillar, p]))
 
@@ -145,6 +147,9 @@ export default async function ClientDetailPage({ params }) {
                 uses, since client.domain is stored inconsistently
                 (sometimes with a leading "www.") across real client rows. */}
             <CompetitorsManager clientId={client.id} competitors={competitors} clientDomain={normalizeDomain(client.domain) || normalizeDomain(client.url)} bare />
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+              <OpportunitiesManager clientId={client.id} opportunities={opportunities} bare />
+            </div>
           </div>
         )}
       </>
