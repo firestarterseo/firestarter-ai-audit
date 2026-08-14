@@ -570,6 +570,49 @@ rather than repeated).
   Fails safe per keyword, same as everything else in this feature: a
   failed Cloro call just leaves that keyword's `serpLandscape` as
   `'unknown'` rather than blocking the opportunity or the audit run.
+- **realistic_tier bug found and fixed same day (2026-08-15), caught by
+  Skyler on the first live run with real SERP data.** "seo agency"
+  (thriveagency.com #1, Coalition Technologies and PowerDigital also in
+  the real SERP) came back tagged `near_term` -- but its own `tier_reason`
+  said "the national term is highly competitive, but a local Denver/
+  Colorado variant is a solid near-term opportunity." The label and its
+  own justification contradicted each other. Same pattern on "marketing
+  agency" (VaynerMedia), "digital agency" (PowerDigital, VaynerMedia
+  again), "social media marketing agency" (We Are Social) -- the model was
+  defaulting to `near_term` for almost every commercial term the instant
+  a local variant was plausible, rather than actually grounding the tier
+  in the real authority gap to the peer agencies the SERP check surfaced.
+  Root cause: `realistic_tier` was being judged against the broad head
+  term while `suggested_local_variant` was a separate, disconnected
+  suggestion -- nothing forced the two to agree on which query the tier
+  actually described.
+
+  Separately, `lib/serpLandscape.js` was already computing
+  `serpKnownNonCompetitorDomains` (which of the real SERP domains are
+  directories/aggregators via the existing `lib/nonCompetitorDomains.js`
+  list, e.g. `clutch.co`, `agencies.semrush.com` -- both appeared in the
+  live "peer agency" reasoning above even though both are already on that
+  list) but it was never actually included in the Anthropic payload, so
+  the model had no way to discount them.
+
+  Fix: `lib/keywordRelevance.js`'s schema and system prompt now require
+  `realistic_tier`/`tier_reason` to describe whichever SPECIFIC query is
+  being recommended -- the `suggested_local_variant` when one exists, not
+  the unmodified national term -- and state plainly that a plausible local
+  variant existing does NOT make the national term `near_term`; a
+  well-known, well-funded, nationally-established competitor holding the
+  unmodified term makes it `aspirational` regardless. `candidates` now
+  also sends `serp_known_non_competitor_domains` so directory/aggregator
+  pages stop getting counted as peer-agency evidence.
+  `OpportunitiesManager.js` pairs the tier label with the exact variant it
+  describes (`"Realistic near-term for \"seo agency Denver\""` rather than
+  a bare "Realistic near-term" sitting next to the raw national term) as a
+  display-level safeguard, so this specific mismatch can't render
+  ambiguously again even if a future model call drifts. Not yet re-run
+  live against Firestarter SEO as of this writing -- worth spot-checking
+  the next audit run's `tierReason` text against the real `serpTopDomains`
+  shown, same "verify, don't guess" habit that caught this bug in the
+  first place.
 - **Public lead-capture pipeline needs to inherit all of the above once
   built.** Skyler flagged (2026-08-14) that the public "AI audit" embed
   (see "Public lead-capture pipeline" above -- still backlog, not yet

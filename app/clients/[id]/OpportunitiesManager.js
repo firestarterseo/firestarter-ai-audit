@@ -102,7 +102,20 @@ export default function OpportunitiesManager({ clientId, opportunities, bare = f
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
                 {o.detail?.realisticTier && (
                   <span className="text-tiny" style={{ fontWeight: 600, color: TIER_COLOR[o.detail.realisticTier] || 'var(--text)' }}>
+                    {/* Display safeguard added 2026-08-15 after a live run
+                        showed "seo agency" (thriveagency.com #1, plus
+                        Coalition Technologies/PowerDigital in the real
+                        SERP) tagged a flat "Realistic near-term" -- the
+                        model's OWN tier_reason said the national term
+                        wasn't realistic and only the local variant was.
+                        lib/keywordRelevance.js's prompt now instructs the
+                        tier to describe the suggested variant specifically
+                        when one exists, but this pairs the label with that
+                        exact variant in the UI too, so the same visual
+                        mismatch can't recur even if a future model call
+                        drifts. */}
                     {TIER_LABEL[o.detail.realisticTier] || o.detail.realisticTier}
+                    {o.detail?.suggestedLocalVariant ? ` for "${o.detail.suggestedLocalVariant}"` : ''}
                   </span>
                 )}
                 {o.detail?.funnelStage && (
@@ -115,7 +128,7 @@ export default function OpportunitiesManager({ clientId, opportunities, bare = f
                 {SERP_LANDSCAPE_LABEL[o.detail?.serpLandscape] && (
                   <span className="text-tiny text-muted">{SERP_LANDSCAPE_LABEL[o.detail.serpLandscape]}</span>
                 )}
-                {o.detail?.suggestedLocalVariant && (
+                {o.detail?.suggestedLocalVariant && !o.detail?.realisticTier && (
                   <span className="text-tiny text-muted">try instead: &ldquo;{o.detail.suggestedLocalVariant}&rdquo;</span>
                 )}
               </div>
