@@ -256,9 +256,29 @@ rather than repeated).
     this as a parallel track once the content-brief workflow above is
     flowing, not blocking on it.
   - **The keyword-count sub-check's SCORE (not just the opportunity list)
-    has the same scale-mismatch problem** (raised 2026-08-14, reviewing a
-    real run: Firestarter's own 89-vs-2538 ratio against thriveagency.com,
-    a much larger national agency). Decision: don't make the 40-point
+    has the same scale-mismatch problem -- BUILT 2026-08-15.** Raised
+    2026-08-14, reviewing a real run: Firestarter's own 89-vs-2538 ratio
+    against thriveagency.com, a much larger national agency; confirmed as
+    a live bug 2026-08-15 when the first real keyword-opportunity list
+    came back almost entirely sourced from Thrive, including off-topic
+    noise ("erp," "b2b") that a huge, differently-scaled competitor's
+    keyword list is noisier on. Shipped: `getDomainMetrics`
+    (`lib/checkers/ahrefs.js`) now also returns `domain_rating` (same call
+    already made for `org_keywords`, zero extra Ahrefs cost -- not yet
+    verified against a live response, flagged in that file's comments).
+    New `selectScaleComparableCompetitors` in `lib/competitorDetection.js`
+    ranks competitors by proximity to the client's OWN domain rating
+    (closest first) instead of raw keyword count, with a documented
+    fallback to the old behavior when the client's own domain rating is
+    unavailable. Applied in TWO places: the keyword-count score now
+    averages against the 5 closest-scale checked competitors
+    (`MAX_SCALE_COMPARABLE_COMPETITORS`), not all 10; and
+    `fetchMissingKeywordOpportunities` now picks its 3 diffing targets by
+    scale proximity instead of "whoever has the most keywords" -- this is
+    the part that was actually causing "almost all from Thrive," since
+    picking the biggest competitor to diff against structurally
+    guarantees its keywords dominate the result. Decision restated: don't
+    make the 40-point
     ratio itself vertical/relevance-aware -- that trades the "verify,
     don't guess" objectivity this whole project is built on for something
     subjective and hard to defend. Instead fix the competitor SET feeding
@@ -382,13 +402,26 @@ rather than repeated).
     across directories, which costs nothing to check and may be worth
     doing as a cheaper subset before the paid ratings comparison.
 - **LLM prompt drafted for refining keyword opportunities** (2026-08-14,
-  not yet wired in) -- replaces the static `isOffTopicKeyword` blocklist
-  and the raw-volume-only ranking in `buildKeywordOpportunities`
-  (`lib/checkers/competitive-position-checker.js`) with an actual
-  relevance/realism judgment call, cheap to run since the candidate pool
-  is already capped at `MAX_KEYWORD_OPPORTUNITIES` (15). Purely additive
-  to the existing evidence/recommendation layer -- does not change the
-  numeric score, same convention as the rest of this feature. Draft:
+  STILL NOT WIRED IN as of 2026-08-15 -- see below). Replaces the static
+  `isOffTopicKeyword` blocklist and the raw-volume-only ranking in
+  `buildKeywordOpportunities` (`lib/checkers/competitive-position-
+  checker.js`) with an actual relevance/realism judgment call, cheap to
+  run since the candidate pool is already capped at
+  `MAX_KEYWORD_OPPORTUNITIES` (15). Purely additive to the existing
+  evidence/recommendation layer -- does not change the numeric score,
+  same convention as the rest of this feature. Deliberately did NOT
+  patch "erp"/"b2b"-style noise into `OFF_TOPIC_KEYWORD_PATTERNS` as a
+  quick fix on 2026-08-15 even after confirming they were showing up in
+  a real client run -- that blocklist is Firestarter-specific and a
+  static list can't generalize across the 85-client roster (erp is
+  legitimate for an ERP consultant, worthless for an SEO agency); this
+  prompt is the actual fix, a hardcoded patch would just be the same
+  mistake in a different spot. Blocked on: which LLM provider/API key to
+  use -- this project has zero existing generic-LLM-call infrastructure
+  (Cloro is a fixed gateway to the 5 consumer AI engines being TESTED,
+  not a general classification API this app can call for its own
+  purposes) -- needs a new key in Vercel env vars regardless of provider.
+  Draft prompt:
 
   ```
   SYSTEM:
