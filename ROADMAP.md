@@ -401,27 +401,65 @@ rather than repeated).
     likely less impactful than GBP/listing *presence and consistency*
     across directories, which costs nothing to check and may be worth
     doing as a cheaper subset before the paid ratings comparison.
-- **LLM prompt drafted for refining keyword opportunities** (2026-08-14,
-  STILL NOT WIRED IN as of 2026-08-15 -- see below). Replaces the static
-  `isOffTopicKeyword` blocklist and the raw-volume-only ranking in
-  `buildKeywordOpportunities` (`lib/checkers/competitive-position-
-  checker.js`) with an actual relevance/realism judgment call, cheap to
-  run since the candidate pool is already capped at
-  `MAX_KEYWORD_OPPORTUNITIES` (15). Purely additive to the existing
+- **LLM-based keyword-opportunity relevance refinement -- BUILT
+  2026-08-15.** Drafted 2026-08-14, wired in 2026-08-15 once Skyler chose
+  Anthropic as the provider. Replaces the static `isOffTopicKeyword`
+  blocklist and the raw-volume-only ranking in `buildKeywordOpportunities`
+  (`lib/checkers/competitive-position-checker.js`) with an actual
+  relevance/realism judgment call, cheap to run since the candidate pool
+  is already capped at `MAX_KEYWORD_OPPORTUNITIES` (15) -- one Anthropic
+  call per audit run, not per keyword. Purely additive to the existing
   evidence/recommendation layer -- does not change the numeric score,
   same convention as the rest of this feature. Deliberately did NOT
   patch "erp"/"b2b"-style noise into `OFF_TOPIC_KEYWORD_PATTERNS` as a
-  quick fix on 2026-08-15 even after confirming they were showing up in
-  a real client run -- that blocklist is Firestarter-specific and a
-  static list can't generalize across the 85-client roster (erp is
-  legitimate for an ERP consultant, worthless for an SEO agency); this
-  prompt is the actual fix, a hardcoded patch would just be the same
-  mistake in a different spot. Blocked on: which LLM provider/API key to
-  use -- this project has zero existing generic-LLM-call infrastructure
-  (Cloro is a fixed gateway to the 5 consumer AI engines being TESTED,
-  not a general classification API this app can call for its own
-  purposes) -- needs a new key in Vercel env vars regardless of provider.
-  Draft prompt:
+  quick fix even after confirming they were showing up in a real client
+  run -- that blocklist is Firestarter-specific and a static list can't
+  generalize across the 85-client roster (erp is legitimate for an ERP
+  consultant, worthless for an SEO agency); this is the actual fix, a
+  hardcoded patch would just be the same mistake in a different spot.
+
+  New files:
+  - `lib/llm/anthropic.js` -- generic `callAnthropicTool()` wrapper
+    around Anthropic's Messages API, using forced tool-use
+    (`tool_choice: {type: 'tool', ...}`) for reliable structured JSON
+    output instead of parsing freeform text. Plain `fetch`, no SDK
+    dependency added, matching how Ahrefs/Cloro are already called in
+    this codebase. Model defaults to `claude-haiku-5`, overridable via
+    an `ANTHROPIC_MODEL` env var without a code change.
+  - `lib/keywordRelevance.js` -- `refineKeywordOpportunities()`, the
+    actual classification call: judges each candidate keyword for
+    topical relevance, funnel stage, local-intent fit (flags a national
+    head term for a local business and suggests a local variant), and
+    realistic winnability given the domain-rating gap to the competitor.
+
+  Wired into `lib/runAudit.js`: after Competitive Position computes its
+  keyword opportunities, they're passed through
+  `refineKeywordOpportunities()` before syncing to the `opportunities`
+  table. **Fails safe on every failure mode** -- missing
+  `ANTHROPIC_API_KEY`, network error, malformed response, or the model
+  skipping a keyword -- by passing that item through unfiltered
+  (`llmRefined: false`) rather than silently dropping a real,
+  deterministically-computed opportunity. This layer can only ever
+  *remove* a keyword it explicitly classified as irrelevant; it can
+  never zero out the list because of its own hiccup. Same "a
+  non-essential side effect failing shouldn't break the audit"
+  convention as the rest of this feature.
+
+  `OpportunitiesManager.js` updated to show the enrichment when present
+  (realistic-tier badge, funnel stage, suggested local variant,
+  relevance/tier reasoning) and degrade gracefully to just the raw
+  keyword/volume/competitor line when it isn't (rows synced before this
+  shipped, or a run where the call failed).
+
+  **Requires Skyler to add `ANTHROPIC_API_KEY` to Vercel's environment
+  variables** -- this is the one manual step I can't do myself.
+  `ANTHROPIC_MODEL` is optional, only needed to override the default
+  model slug.
+
+  Prompt actually shipped (client context today is name/domain/city/
+  region/category from the existing `clients` row plus this run's own
+  Ahrefs domain rating -- not yet the richer `service_area_type`/
+  `ymyl_sensitive` fields below, which are still backlog):
 
   ```
   SYSTEM:

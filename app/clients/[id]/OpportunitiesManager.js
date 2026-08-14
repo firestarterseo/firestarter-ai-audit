@@ -15,6 +15,9 @@ import { useRouter } from 'next/navigation'
 
 const STATUS_LABEL = { open: 'Open', in_progress: 'In progress', done: 'Done', dismissed: 'Dismissed' }
 const STATUS_ORDER = ['open', 'in_progress', 'done', 'dismissed']
+const FUNNEL_LABEL = { informational: 'Informational', commercial: 'Commercial', transactional: 'Transactional' }
+const TIER_LABEL = { near_term: 'Realistic near-term', aspirational: 'Aspirational' }
+const TIER_COLOR = { near_term: 'var(--grade-a)', aspirational: 'var(--grade-d)' }
 
 function formatVolume(v) {
   if (typeof v !== 'number') return null
@@ -81,6 +84,31 @@ export default function OpportunitiesManager({ clientId, opportunities, bare = f
               )}
               <span className="pill pill-lead" style={{ textTransform: 'none', marginLeft: 'auto' }}>{STATUS_LABEL[o.status] || o.status}</span>
             </div>
+            {/* Only present once lib/keywordRelevance.js's Anthropic
+                refinement has actually run for this row (o.detail.realisticTier
+                is undefined otherwise -- rows synced before that was wired
+                in, or a run where the call failed, degrade gracefully to
+                just the raw keyword/volume/competitor line above). */}
+            {(o.detail?.funnelStage || o.detail?.realisticTier) && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+                {o.detail?.realisticTier && (
+                  <span className="text-tiny" style={{ fontWeight: 600, color: TIER_COLOR[o.detail.realisticTier] || 'var(--text)' }}>
+                    {TIER_LABEL[o.detail.realisticTier] || o.detail.realisticTier}
+                  </span>
+                )}
+                {o.detail?.funnelStage && (
+                  <span className="text-tiny text-muted">{FUNNEL_LABEL[o.detail.funnelStage] || o.detail.funnelStage}</span>
+                )}
+                {o.detail?.suggestedLocalVariant && (
+                  <span className="text-tiny text-muted">try instead: &ldquo;{o.detail.suggestedLocalVariant}&rdquo;</span>
+                )}
+              </div>
+            )}
+            {(o.detail?.tierReason || o.detail?.relevanceReason) && (
+              <p className="text-tiny text-muted" style={{ margin: '4px 0 0' }}>
+                {o.detail.relevanceReason || o.detail.tierReason}
+              </p>
+            )}
             {o.detail?.resolved_reason && (
               <p className="text-tiny text-muted" style={{ margin: '6px 0 0' }}>
                 Auto-closed -- no longer detected as a gap on the most recent audit.
