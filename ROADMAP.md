@@ -653,27 +653,54 @@ rather than repeated).
   to scale-comparable competitors (or, if Firestarter's own domain rating
   genuinely can't be computed for some other reason, a real, specific
   Ahrefs error message instead of a silent `null`).
-- **Real numeric analysis vs. LLM-judged labels -- open question raised by
-  Skyler 2026-08-15, not yet resolved.** Direct concern: even with the
-  domain-rating bug above fixed, `realistic_tier` is still fundamentally
-  an LLM judgment call informed by a handful of numbers and domain names,
-  not a deterministic, checkable calculation -- "all we are doing is
-  changing the labels." Fair critique. Ahrefs has a purpose-built metric
-  for exactly this question that this project isn't using at all yet:
-  Keyword Difficulty (KD), computed from the real backlink profiles of
-  the pages currently ranking for a keyword, available via Keywords
-  Explorer's `/overview` endpoint. Pairing a keyword's real KD with the
-  client's own (now-fixed) domain rating -- and potentially the real
-  domain ratings of the actual top-ranking pages Cloro's SERP check
-  surfaces, not just the tracked competitor -- would let realistic_tier
-  be computed from real numbers with an explicit, inspectable threshold,
-  instead of inferred from an LLM's read of brand names. Not yet
-  built -- would add real Ahrefs cost (one KD call per candidate keyword,
-  plus potentially a domain-rating call per real top-ranking domain
-  found -- up to several dozen extra Ahrefs calls per audit run) on top
-  of everything already added today, so this needs the same explicit
-  cost-tradeoff conversation as the Cloro SERP-landscape build before
-  committing to it.
+- **Real numeric analysis vs. LLM-judged labels -- BUILT 2026-08-15.**
+  Direct concern from Skyler, same day as the domain-rating fix above:
+  even with real SERP domains and a real client domain rating,
+  `realistic_tier` was still fundamentally an LLM judgment call, not a
+  deterministic, checkable calculation -- "all we are doing is changing
+  the labels." Fair critique.
+
+  Fix: Ahrefs has a purpose-built metric for exactly this question that
+  this project wasn't using at all -- Keyword Difficulty (KD), computed
+  by Ahrefs from the real backlink profiles of the pages currently
+  ranking for a keyword. `lib/checkers/ahrefs.js` gained
+  `getKeywordDifficulty()`, calling Keywords Explorer's `/overview`
+  endpoint (a different Ahrefs product surface from every other function
+  in that file, which all call Site Explorer) -- turned out cheaper than
+  first estimated: the endpoint accepts a comma-separated keyword list,
+  so this is ONE additional Ahrefs call for the whole candidate list
+  (capped at 15), not one call per keyword. `lib/keywordDifficulty.js`'s
+  `annotateWithKeywordDifficulty` wires it into the pipeline the same way
+  `lib/serpLandscape.js` does.
+
+  `lib/keywordRelevance.js` gained `computeRealisticTier({
+  keywordDifficulty, clientDomainRating })` -- a real, inspectable
+  formula: KD and domain rating are the same 0-100 scale, so
+  `aspirational` is simply KD exceeding the client's own domain rating by
+  more than `ASPIRATIONAL_GAP_THRESHOLD` (15, a real adjustable constant,
+  not a black box), otherwise `near_term`. Whenever both real numbers are
+  available, this OVERRIDES whatever the LLM returned for
+  `realistic_tier`, and `tier_reason` gets rewritten to cite the actual
+  KD/DR numbers and the gap between them -- the LLM still owns relevance,
+  funnel stage, and serp_landscape (those genuinely need judgment a raw
+  number can't provide), but the near-term-vs-aspirational call itself is
+  now math whenever the data exists, falling back to the LLM's own guess
+  (prior behavior, unchanged) only when KD or domain rating is missing.
+  `tierSource` (`'computed'` vs `'llm_judgment'`) rides along into
+  `detail` and renders as an explicit badge in `OpportunitiesManager.js`
+  ("from real KD data" vs "LLM estimate, no KD data") alongside the raw
+  `KD {n}/100` number itself -- never silently presented as the same
+  kind of claim.
+
+  **Cost:** one additional batched Ahrefs call per audit run (not per
+  keyword, per Skyler's approval to build this immediately) -- cheaper
+  than the "several dozen calls" estimate given when this was proposed,
+  since Keywords Explorer's `/overview` takes a whole keyword list at
+  once. `country` defaults to lowercase `'us'`, matching the lesson
+  already learned from `getOrganicCompetitors`'s casing bug -- NOT yet
+  verified against a live call for this specific endpoint; if
+  `difficulty` comes back null across the board even for keywords that
+  plainly have volume, check country casing here first.
 - **Public lead-capture pipeline needs to inherit all of the above once
   built.** Skyler flagged (2026-08-14) that the public "AI audit" embed
   (see "Public lead-capture pipeline" above -- still backlog, not yet

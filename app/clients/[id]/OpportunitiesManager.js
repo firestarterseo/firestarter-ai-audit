@@ -27,6 +27,13 @@ const FUNNEL_LABEL = { informational: 'Informational', commercial: 'Commercial',
 const TIER_LABEL = { near_term: 'Realistic near-term', aspirational: 'Aspirational', citation_target: 'Citation target, not a ranking play' }
 const TIER_COLOR = { near_term: 'var(--grade-a)', aspirational: 'var(--grade-d)', citation_target: 'var(--grade-c)' }
 const SERP_LANDSCAPE_LABEL = { peer_agency_competitive: 'SERP: peer agencies', publisher_dominated: 'SERP: publisher-dominated', mixed: 'SERP: mixed' }
+// tierSource (added 2026-08-15, see lib/keywordRelevance.js's
+// computeRealisticTier): direct answer to "we're just changing labels" --
+// 'computed' means the tier above came from a real Ahrefs Keyword
+// Difficulty vs. domain rating calculation, not an LLM guess. Shown
+// explicitly either way so a strategist never has to wonder which mode
+// produced a given tag.
+const TIER_SOURCE_LABEL = { computed: 'from real KD data', llm_judgment: 'LLM estimate, no KD data' }
 
 function formatVolume(v) {
   if (typeof v !== 'number') return null
@@ -76,7 +83,7 @@ export default function OpportunitiesManager({ clientId, opportunities, bare = f
         <span className="pill pill-tracked" style={{ marginLeft: 'auto' }}>{open.length} open</span>
       </div>
       <p className="text-small text-muted" style={{ margin: '0 0 12px' }}>
-        Specific, real keyword gaps a tracked competitor already ranks well for, ranked by search volume -- diffed from the Competitive Position pillar above and checked against live Google results for who's actually holding the top spots. A &ldquo;citation target&rdquo; tag means the real SERP is dominated by large media/reference publishers, not a peer competitor -- the realistic move there is earning a mention inside that publisher's content, not writing a page to out-rank it. Move each through Open &rarr; In progress &rarr; Done as you brief/pursue it, or dismiss one that isn't worth pursuing. A gap the tool no longer detects (the client starts ranking, or the competitor drops off) closes itself automatically on the next audit -- you'll never need to clean these up by hand.
+        Specific, real keyword gaps a tracked competitor already ranks well for, ranked by search volume -- diffed from the Competitive Position pillar above and checked against live Google results for who's actually holding the top spots. Where Ahrefs Keyword Difficulty and your own domain rating are both available, near-term/aspirational is a real calculation (labeled &ldquo;from real KD data&rdquo;), not a guess -- it only falls back to an LLM estimate when that data isn't available. A &ldquo;citation target&rdquo; tag means the real SERP is dominated by large media/reference publishers, not a peer competitor -- the realistic move there is earning a mention inside that publisher's content, not writing a page to out-rank it. Move each through Open &rarr; In progress &rarr; Done as you brief/pursue it, or dismiss one that isn't worth pursuing. A gap the tool no longer detects (the client starts ranking, or the competitor drops off) closes itself automatically on the next audit -- you'll never need to clean these up by hand.
       </p>
 
       <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
@@ -117,6 +124,18 @@ export default function OpportunitiesManager({ clientId, opportunities, bare = f
                     {TIER_LABEL[o.detail.realisticTier] || o.detail.realisticTier}
                     {o.detail?.suggestedLocalVariant ? ` for "${o.detail.suggestedLocalVariant}"` : ''}
                   </span>
+                )}
+                {/* Transparency badge (added 2026-08-15): tells a
+                    strategist whether the tier above is a real
+                    calculation (Ahrefs Keyword Difficulty vs. domain
+                    rating) or, when KD/domain-rating data wasn't
+                    available, the model's own estimate -- never silently
+                    presented as the same thing. */}
+                {o.detail?.tierSource && (
+                  <span className="text-tiny text-muted" style={{ fontStyle: 'italic' }}>{TIER_SOURCE_LABEL[o.detail.tierSource] || o.detail.tierSource}</span>
+                )}
+                {typeof o.detail?.keywordDifficulty === 'number' && (
+                  <span className="text-tiny text-muted">KD {o.detail.keywordDifficulty}/100</span>
                 )}
                 {o.detail?.funnelStage && (
                   <span className="text-tiny text-muted">{FUNNEL_LABEL[o.detail.funnelStage] || o.detail.funnelStage}</span>
