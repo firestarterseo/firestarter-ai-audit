@@ -78,29 +78,27 @@ export default function CompetitorsManager({ clientId, competitors, clientDomain
         Auto-detected from AI-citation "cited instead" data and Ahrefs organic-keyword overlap on every audit -- at least 2 active competitors are needed for this pillar to grade. Add one by hand below if you know of a competitor that hasn't shown up yet.
       </p>
 
-      {/* Permanent "this is you" reference row -- your own domain is
-          deliberately excluded from the tracked-competitor list itself
-          (see lib/competitorDetection.js's self-domain matching) so it
-          never inflates the win/loss tally against itself, but that made
-          it look like the domain had simply vanished with no explanation.
-          This row is display-only (not a client_competitors row, nothing
-          to toggle or delete) -- just a fixed point of reference so it's
-          clear you're being compared, not omitted. */}
-      {clientDomain && (
-        <div className="text-small" style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          padding: '8px 10px', marginBottom: 10,
-          background: 'var(--bg-alt)', borderRadius: 'var(--radius-sm)',
-          border: '1px solid #bbf7d0'
-        }}>
-          <span style={{ fontWeight: 600 }}>{clientDomain}</span>
-          <span className="pill pill-you">This is you</span>
-          <span className="text-tiny text-muted" style={{ marginLeft: 'auto' }}>Reference only -- excluded from the competitor list above</span>
-        </div>
-      )}
-
-      {visible.length > 0 && (
+      {(clientDomain || visible.length > 0) && (
         <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
+          {/* "This is you" row -- rendered as a plain row in the SAME list
+              as everyone else (like a search-results list, per direct
+              feedback -- a separate callout box read as disconnected from
+              "the list"), not a distinct box above it. Your own domain is
+              still deliberately excluded from the tracked-competitor tally
+              itself (see lib/competitorDetection.js's self-domain matching)
+              so it never inflates the win/loss score against itself, but
+              this way it reads as "here's where you sit, for reference,"
+              not "silently removed with no explanation." Display-only --
+              not a client_competitors row, nothing to toggle or delete. */}
+          {clientDomain && (
+            <div className="text-small" style={{ padding: '8px 10px', background: 'var(--bg-alt)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontWeight: 600 }}>{clientDomain}</span>
+                <span className="pill pill-you">This is you</span>
+                <span className="text-tiny text-muted" style={{ marginLeft: 'auto' }}>Excluded from the competitor tally below</span>
+              </div>
+            </div>
+          )}
           {visible.map(c => (
             <div key={c.id} className="text-small" style={{
               padding: '8px 10px', background: 'var(--bg-alt)', borderRadius: 'var(--radius-sm)',
