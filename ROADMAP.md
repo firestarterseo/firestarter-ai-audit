@@ -613,6 +613,67 @@ rather than repeated).
   the next audit run's `tierReason` text against the real `serpTopDomains`
   shown, same "verify, don't guess" habit that caught this bug in the
   first place.
+- **clientDomainRating bug found and fixed same day (2026-08-15), also
+  caught by Skyler.** Live evidence still showed "Ranking for 90 total
+  organic keyword(s) (Ahrefs) vs an average of 4742" -- completely
+  unchanged from before the scale-matching fix "shipped." Checked
+  `pillar_scores.raw` directly in Supabase: `clientDomainRating` was
+  `null` on every recent run. Root cause: `getDomainMetrics()`
+  (`lib/checkers/ahrefs.js`) was requesting `domain_rating` as a `select`
+  field on Ahrefs' `/site-explorer/metrics` report -- confirmed against
+  Ahrefs' own docs that this field DOES NOT EXIST on that report at all
+  (its real fields are org_keywords/org_traffic/paid_* etc.), so the
+  value silently never came back. This meant
+  `selectScaleComparableCompetitors` (the 2026-08-14 fix meant to stop a
+  huge competitor from dominating the comparison) was permanently
+  falling back to its "no domain rating available" path on every single
+  run since it shipped -- i.e. comparing against every checked
+  competitor regardless of size, the exact bug it was built to fix,
+  silently never actually engaging.
+
+  Fix: domain rating lives on its own dedicated Ahrefs report,
+  `/site-explorer/domain-rating` (confirmed via
+  https://docs.ahrefs.com/en/api/reference/site-explorer/get-domain-rating
+  -- response shape `{ domain_rating: { domain_rating: <float>, ... } }`,
+  nested one level deeper than getDomainMetrics' flat shape, worth
+  remembering). Added `getDomainRating()` as its own function/call in
+  `lib/checkers/ahrefs.js`; `lib/competitorDetection.js`'s
+  `fetchKeywordCountMetrics` now calls both per domain and merges the
+  results, keeping the two error paths separate on purpose (a failed
+  domain-rating call must NOT blank out a perfectly good org_keywords
+  count -- it only means that domain falls back to the non-scale-aware
+  path, same graceful degradation as before this existed).
+
+  **Cost note:** doubles this sub-check's Ahrefs call count (was N+1 for
+  N tracked competitors checked, now 2*(N+1)) -- fixing already-intended,
+  already-shipped behavior, not new scope, but worth knowing for Ahrefs
+  plan/quota purposes across 85 clients. Not yet re-run live as of this
+  writing -- next audit run should show `clientDomainRating` populated in
+  `pillar_scores.raw` and the keyword-count comparison actually narrowed
+  to scale-comparable competitors (or, if Firestarter's own domain rating
+  genuinely can't be computed for some other reason, a real, specific
+  Ahrefs error message instead of a silent `null`).
+- **Real numeric analysis vs. LLM-judged labels -- open question raised by
+  Skyler 2026-08-15, not yet resolved.** Direct concern: even with the
+  domain-rating bug above fixed, `realistic_tier` is still fundamentally
+  an LLM judgment call informed by a handful of numbers and domain names,
+  not a deterministic, checkable calculation -- "all we are doing is
+  changing the labels." Fair critique. Ahrefs has a purpose-built metric
+  for exactly this question that this project isn't using at all yet:
+  Keyword Difficulty (KD), computed from the real backlink profiles of
+  the pages currently ranking for a keyword, available via Keywords
+  Explorer's `/overview` endpoint. Pairing a keyword's real KD with the
+  client's own (now-fixed) domain rating -- and potentially the real
+  domain ratings of the actual top-ranking pages Cloro's SERP check
+  surfaces, not just the tracked competitor -- would let realistic_tier
+  be computed from real numbers with an explicit, inspectable threshold,
+  instead of inferred from an LLM's read of brand names. Not yet
+  built -- would add real Ahrefs cost (one KD call per candidate keyword,
+  plus potentially a domain-rating call per real top-ranking domain
+  found -- up to several dozen extra Ahrefs calls per audit run) on top
+  of everything already added today, so this needs the same explicit
+  cost-tradeoff conversation as the Cloro SERP-landscape build before
+  committing to it.
 - **Public lead-capture pipeline needs to inherit all of the above once
   built.** Skyler flagged (2026-08-14) that the public "AI audit" embed
   (see "Public lead-capture pipeline" above -- still backlog, not yet
