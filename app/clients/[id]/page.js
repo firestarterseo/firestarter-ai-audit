@@ -1,4 +1,5 @@
 import { getClientWithRuns, getClientCompetitors, sanitizeClient } from '../../../lib/data'
+import { normalizeDomain } from '../../../lib/nonCompetitorDomains'
 import RunAuditButton from './RunAuditButton'
 import PromptTester from './PromptTester'
 import TestPromptsManager from './TestPromptsManager'
@@ -138,7 +139,12 @@ export default async function ClientDetailPage({ params }) {
         )}
         {key === 'competitive_position' && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-            <CompetitorsManager clientId={client.id} competitors={competitors} bare />
+            {/* clientDomain is only ever used for a read-only display
+                comparison (rendering a "this is you" reference row) --
+                normalized server-side here with the same helper detection
+                uses, since client.domain is stored inconsistently
+                (sometimes with a leading "www.") across real client rows. */}
+            <CompetitorsManager clientId={client.id} competitors={competitors} clientDomain={normalizeDomain(client.domain) || normalizeDomain(client.url)} bare />
           </div>
         )}
       </>

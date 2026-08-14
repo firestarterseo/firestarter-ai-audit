@@ -322,6 +322,7 @@ p, span, div, label, input, select, textarea, button {
 .pill-tracked { background: #dbeafe; color: #1e40af; }
 .pill-lead { background: #fef3c7; color: #92400e; }
 .pill-snapshot { background: #fef3c7; color: #92400e; }
+.pill-you { background: #dcfce7; color: #166534; }
 
 /* ---------- Forms ---------- */
 
