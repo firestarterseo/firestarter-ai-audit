@@ -16,8 +16,17 @@ import { useRouter } from 'next/navigation'
 const STATUS_LABEL = { open: 'Open', in_progress: 'In progress', done: 'Done', dismissed: 'Dismissed' }
 const STATUS_ORDER = ['open', 'in_progress', 'done', 'dismissed']
 const FUNNEL_LABEL = { informational: 'Informational', commercial: 'Commercial', transactional: 'Transactional' }
-const TIER_LABEL = { near_term: 'Realistic near-term', aspirational: 'Aspirational' }
-const TIER_COLOR = { near_term: 'var(--grade-a)', aspirational: 'var(--grade-d)' }
+// realistic_tier now has a third value, 'citation_target' (added
+// 2026-08-15 alongside serp_landscape -- see lib/keywordRelevance.js):
+// this term's real Google-SERP top results are large media/reference
+// publishers, not peer businesses, so the realistic play is earning a
+// citation/mention inside that publisher's content, not writing a page
+// to out-rank it. Distinct color from "aspirational" -- it isn't a
+// harder version of the same content play, it's a different play
+// entirely.
+const TIER_LABEL = { near_term: 'Realistic near-term', aspirational: 'Aspirational', citation_target: 'Citation target, not a ranking play' }
+const TIER_COLOR = { near_term: 'var(--grade-a)', aspirational: 'var(--grade-d)', citation_target: 'var(--grade-c)' }
+const SERP_LANDSCAPE_LABEL = { peer_agency_competitive: 'SERP: peer agencies', publisher_dominated: 'SERP: publisher-dominated', mixed: 'SERP: mixed' }
 
 function formatVolume(v) {
   if (typeof v !== 'number') return null
@@ -67,7 +76,7 @@ export default function OpportunitiesManager({ clientId, opportunities, bare = f
         <span className="pill pill-tracked" style={{ marginLeft: 'auto' }}>{open.length} open</span>
       </div>
       <p className="text-small text-muted" style={{ margin: '0 0 12px' }}>
-        Specific, real keyword gaps a tracked competitor already ranks well for, ranked by search volume -- diffed from the Competitive Position pillar above. Move each through Open &rarr; In progress &rarr; Done as you brief and publish content against it, or dismiss one that isn't worth pursuing. A gap the tool no longer detects (the client starts ranking, or the competitor drops off) closes itself automatically on the next audit -- you'll never need to clean these up by hand.
+        Specific, real keyword gaps a tracked competitor already ranks well for, ranked by search volume -- diffed from the Competitive Position pillar above and checked against live Google results for who's actually holding the top spots. A &ldquo;citation target&rdquo; tag means the real SERP is dominated by large media/reference publishers, not a peer competitor -- the realistic move there is earning a mention inside that publisher's content, not writing a page to out-rank it. Move each through Open &rarr; In progress &rarr; Done as you brief/pursue it, or dismiss one that isn't worth pursuing. A gap the tool no longer detects (the client starts ranking, or the competitor drops off) closes itself automatically on the next audit -- you'll never need to clean these up by hand.
       </p>
 
       <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
@@ -99,6 +108,13 @@ export default function OpportunitiesManager({ clientId, opportunities, bare = f
                 {o.detail?.funnelStage && (
                   <span className="text-tiny text-muted">{FUNNEL_LABEL[o.detail.funnelStage] || o.detail.funnelStage}</span>
                 )}
+                {/* Only rendered for peer_agency_competitive/publisher_dominated/
+                    mixed -- 'unknown' (the Cloro SERP check wasn't available
+                    for this keyword) intentionally shows no badge rather than
+                    a confusing "SERP: unknown" pill. */}
+                {SERP_LANDSCAPE_LABEL[o.detail?.serpLandscape] && (
+                  <span className="text-tiny text-muted">{SERP_LANDSCAPE_LABEL[o.detail.serpLandscape]}</span>
+                )}
                 {o.detail?.suggestedLocalVariant && (
                   <span className="text-tiny text-muted">try instead: &ldquo;{o.detail.suggestedLocalVariant}&rdquo;</span>
                 )}
@@ -107,6 +123,16 @@ export default function OpportunitiesManager({ clientId, opportunities, bare = f
             {(o.detail?.tierReason || o.detail?.relevanceReason) && (
               <p className="text-tiny text-muted" style={{ margin: '4px 0 0' }}>
                 {o.detail.relevanceReason || o.detail.tierReason}
+              </p>
+            )}
+            {/* Real evidence backing the serpLandscape judgment above --
+                the actual live top-5 Google-SERP domains for this exact
+                keyword (lib/serpLandscape.js), so a strategist can verify
+                the "publisher-dominated" call rather than take it on
+                faith. */}
+            {Array.isArray(o.detail?.serpTopDomains) && o.detail.serpTopDomains.length > 0 && (
+              <p className="text-tiny text-muted" style={{ margin: '4px 0 0' }}>
+                Currently ranking: {o.detail.serpTopDomains.join(', ')}
               </p>
             )}
             {o.detail?.resolved_reason && (

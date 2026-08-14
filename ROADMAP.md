@@ -509,6 +509,67 @@ rather than repeated).
   automation above) exactly the inputs it needs -- relevance, funnel
   stage, and a realistic local variant -- instead of a flat, volume-
   sorted list.
+- **Model-ID bug found and fixed same day (2026-08-15).** The Anthropic
+  wiring above shipped with `DEFAULT_MODEL = 'claude-haiku-5'` in
+  `lib/llm/anthropic.js` -- that model ID doesn't exist. Every
+  classification call was silently failing (model-not-found), which
+  `refineKeywordOpportunities`'s fail-safe design correctly caught by
+  passing every keyword through unrefined (`llmRefined: false`) -- so the
+  audit never broke, it just meant refinement never actually ran, and a
+  live run still showed "erp"/"b2b" with no tier tags. Confirmed the
+  correct current slug against
+  https://platform.claude.com/docs/en/about-claude/models/overview
+  (`claude-haiku-4-5`, an alias pinned to `claude-haiku-4-5-20251001`) and
+  fixed the default. Worth remembering: the fail-safe design did its job
+  here -- it just means "nothing looks refined" can ALSO mean "the call is
+  silently failing," not only "no data yet." Worth checking `llmRefined`/
+  `llmError` on a few rows after any future model-default change.
+- **Real SERP-landscape evidence via Cloro -- BUILT 2026-08-15.** Skyler's
+  direct question: for a lot of these keyword candidates, is the real
+  competition even the tracked agency Ahrefs diffed against, or is it
+  actually media/reference publishers (Search Engine Journal, SEMrush,
+  HubSpot, Moz, WordStream...) that dominate informational, top-of-funnel
+  terms? Judging "realistic_tier" off thriveagency.com's Ahrefs position
+  when the real #1-3 Google results are publishers Thrive isn't even
+  among was misleading -- Ahrefs' tracked-competitor diffing structurally
+  can't see this, since it only ever reports positions for domains already
+  on the tracked-competitor list.
+
+  Fix: `lib/serpLandscape.js` fires one live Cloro "google" call PER
+  candidate keyword (using the keyword text itself as the query) and
+  extracts the real, current top organic-result domains --
+  `defaultCloroCaller`/`extractEngineSignal` reused directly from
+  `lib/checkers/ai-visibility-snapshot-checker.js` (now exported) rather
+  than re-deriving the same google-shape parsing a second time; that
+  parsing was already verified 2026-08-10 against a real live capture.
+  This is the SAME Cloro API/key already paid for and called weekly for
+  AI & GEO Visibility -- no new provider, no new env var.
+
+  Wired into `lib/runAudit.js` BEFORE `refineKeywordOpportunities`, so the
+  LLM call gets real `serp_top_domains` evidence per keyword instead of
+  inferring everything from the tracked competitor's brand name alone.
+  `lib/keywordRelevance.js`'s schema gained a `serp_landscape` field
+  (`peer_agency_competitive` | `publisher_dominated` | `mixed` | `unknown`
+  -- "unknown" used deliberately over a confident guess when the Cloro
+  check wasn't available for a keyword) and `realistic_tier` gained a
+  third value, `citation_target`: when the real SERP is publisher-
+  dominated, the honest recommendation isn't "write a page and try to
+  out-rank Search Engine Journal," it's "get mentioned/quoted inside that
+  publisher's existing content" -- a citation/PR play, not a content play.
+  `OpportunitiesManager.js` shows a "SERP: publisher-dominated" /
+  "SERP: peer agencies" badge plus the actual top-5 ranking domains found,
+  so a strategist can verify the call rather than take it on faith.
+
+  **Cost tradeoff, confirmed with Skyler before building:** this is one
+  ADDITIONAL live Cloro call per candidate keyword (capped at
+  `MAX_KEYWORD_OPPORTUNITIES`, 15), on EVERY audit run, across all
+  clients -- real ongoing Cloro usage on top of the existing weekly AI-
+  visibility tracking, not a one-time cost. Chosen deliberately over the
+  free-but-guessed version because a judgment this consequential (which
+  keywords are even worth pursuing) is worth grounding in real evidence.
+  Fails safe per keyword, same as everything else in this feature: a
+  failed Cloro call just leaves that keyword's `serpLandscape` as
+  `'unknown'` rather than blocking the opportunity or the audit run.
 - **Public lead-capture pipeline needs to inherit all of the above once
   built.** Skyler flagged (2026-08-14) that the public "AI audit" embed
   (see "Public lead-capture pipeline" above -- still backlog, not yet
