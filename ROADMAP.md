@@ -174,6 +174,58 @@ rather than repeated).
   was explicitly rejected as a grading gate ("I don't want this excluded.
   I want it to work") and is only ever optional polish (add/rename/
   deactivate via the Competitive Position tile's competitor manager).
+  - **Multi-industry directory exclusion list + tracked-competitor
+    trimming logic -- BUILT 2026-08-15.** Direct client feedback, two
+    parts. First: "will this [detection] logic hold up for a home
+    services business or a divorce attorney? Nothing analogous exists yet
+    for legal or home services" -- correct; `lib/nonCompetitorDomains.js`
+    only had agency-specific directory entries (designrush.com,
+    zoominfo.com, etc.), so a divorce-attorney client would plausibly hit
+    FindLaw/Justia/Martindale-Hubbell/SuperLawyers/Lawyers.com profile
+    pages and miscount them as competing law firms -- same failure mode
+    as the agency-directory bug, just not yet caught because no client in
+    that vertical had run through it. Then: "Can we create a large list
+    excluding directories like this for all industries?" Added
+    `MULTI_INDUSTRY_DIRECTORY_DOMAINS` (~90 domains across legal, home
+    services, medical, real estate, automotive, financial services,
+    hospitality, education, and general e-commerce marketplaces) --
+    documented in the file itself as a deliberate, one-time departure
+    from this list's previously-stated reactive-only philosophy ("expand
+    over time as real citations surface sources," which is right for
+    ambiguous cases but the wrong call for well-known, unambiguous,
+    single-purpose directory platforms whose classification doesn't
+    depend on any specific client's situation).
+    Second, separately: "25 seems like a lot of competitors for this
+    list, any way to filter some out?" Checked `detectAndSyncCompetitors`
+    directly -- confirmed no cap, no minimum-occurrence threshold, and no
+    staleness decay existed anywhere; a domain became a permanent tracked
+    competitor the moment it was cited even once across up to 500
+    historical AI-visibility runs. Fixed with two mechanisms working
+    together rather than a single hard cap (a cap truncates by an
+    arbitrary rule, not by whether a domain is still a real competitor):
+    (1) `MIN_AI_CITATION_OCCURRENCES` (2) now gates new AI-citation-
+    sourced candidates at insertion -- reuses `detectFromAiCitations`'
+    own `occurrences` count, which was already being computed every run
+    and thrown away after only feeding the "looks like a roundup" note;
+    Ahrefs-sourced candidates are exempt since that signal is a live
+    current-overlap check, not a historical mention tally. (2)
+    `deactivateStaleCompetitors` soft-deactivates (reversible, same
+    "Reactivate" button already in the UI) any non-manual, non-
+    strategist-confirmed competitor not genuinely re-detected in
+    `STALE_AFTER_DAYS` (90). Needed a new `last_cited_at` column
+    (migration `add_last_cited_at_to_client_competitors`) because
+    `last_seen_at` turned out NOT to be a reliable staleness signal for
+    AI-citation-sourced rows specifically: `detectFromAiCitations`
+    rescans the most recent 500 tracked runs every sync, so a domain
+    cited exactly once, long ago, keeps reappearing in that scan (and
+    keeps refreshing `last_seen_at` to "now") for as long as that one old
+    run stays inside the 500-row window -- a real, subtle bug that would
+    have made a naive last-seen-based staleness check never actually
+    fire. `last_cited_at` tracks the true last-citation date instead.
+    Both fixes are documented as transparent, in-product copy (not just
+    code comments) in `CompetitorsManager.js`'s description text, so a
+    strategist sees why the list behaves the way it does without reading
+    source.
 - **Public lead-capture pipeline.** Per the original plan this is more
   specific than "a form somewhere": it replaces the existing embed at
   firestarterseo.com/ai-search/ai-audit/, grades via this tool's shared

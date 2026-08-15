@@ -75,7 +75,7 @@ export default function CompetitorsManager({ clientId, competitors, clientDomain
         </span>
       </div>
       <p className="text-small text-muted" style={{ margin: '0 0 12px' }}>
-        Auto-detected from AI-citation "cited instead" data and Ahrefs organic-keyword overlap on every audit -- at least 2 active competitors are needed for this pillar to grade. Add one by hand below if you know of a competitor that hasn't shown up yet.
+        Auto-detected from AI-citation "cited instead" data and Ahrefs organic-keyword overlap on every audit -- at least 2 active competitors are needed for this pillar to grade. A domain cited by AI answers needs at least 2 separate citations before it's added (a single one-off mention isn't enough to call it a real competitor); a domain surfaced through Ahrefs is added right away, since that's a live current-ranking-overlap check, not a mention count. Any tracked competitor that goes 90+ days without a fresh citation or ranking overlap auto-deactivates on its own -- reversible any time via "Reactivate" below -- so this list doesn't just grow forever. Add one by hand below if you know of a competitor that hasn't shown up yet.
       </p>
 
       {(clientDomain || visible.length > 0) && (
