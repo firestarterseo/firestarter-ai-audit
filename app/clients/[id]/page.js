@@ -9,6 +9,7 @@ import CompetitorsManager from './CompetitorsManager'
 import OpportunitiesManager from './OpportunitiesManager'
 import PillarsBoard from './PillarsBoard'
 import TechnicalFoundationWizard from './TechnicalFoundationWizard'
+import ContentAuthorityWizard from './ContentAuthorityWizard'
 
 export const dynamic = 'force-dynamic'
 
@@ -152,7 +153,11 @@ export default async function ClientDetailPage({ params }) {
         ? (
           <TechnicalFoundationWizard pillar={pillarsByKey.get(key)} clientId={client.id} defaultDev={client.default_dev} />
         )
-        : null,
+        : key === 'content_authority'
+          ? (
+            <ContentAuthorityWizard pillar={pillarsByKey.get(key)} />
+          )
+          : null,
     children: (
       <>
         {key === 'ai_geo_visibility' && (
