@@ -44,6 +44,8 @@ export default function OpportunitiesManager({ clientId, opportunities, bare = f
   const router = useRouter()
   const [showClosed, setShowClosed] = useState(false)
   const [busyId, setBusyId] = useState(null)
+  const [briefBusyId, setBriefBusyId] = useState(null)
+  const [briefErrors, setBriefErrors] = useState({})
   const [error, setError] = useState(null)
 
   const all = opportunities || []
@@ -67,6 +69,30 @@ export default function OpportunitiesManager({ clientId, opportunities, bare = f
       setError(err.message)
     } finally {
       setBusyId(null)
+    }
+  }
+
+  // generateBrief -- calls the new /brief route (lib/contentBrief.js) to
+  // write a real content brief + paste-ready draft copy for this specific
+  // opportunity via Anthropic. Deliberately NOT a WordPress publish action
+  // -- per direct confirmation that auto-publishing isn't the priority
+  // right now, this only ever generates something to copy/paste manually.
+  // Saved server-side to opportunities.content_brief (its own column, so
+  // the next audit run's sync never wipes it out -- see that route's
+  // header comment) -- router.refresh() picks up the saved result the same
+  // way setStatus already does.
+  async function generateBrief(opportunity) {
+    setBriefBusyId(opportunity.id)
+    setBriefErrors(prev => ({ ...prev, [opportunity.id]: null }))
+    try {
+      const res = await fetch(`/api/clients/${clientId}/opportunities/${opportunity.id}/brief`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Content brief generation failed')
+      router.refresh()
+    } catch (err) {
+      setBriefErrors(prev => ({ ...prev, [opportunity.id]: err.message }))
+    } finally {
+      setBriefBusyId(null)
     }
   }
 
@@ -172,6 +198,69 @@ export default function OpportunitiesManager({ clientId, opportunities, bare = f
                 Auto-closed -- no longer detected as a gap on the most recent audit.
               </p>
             )}
+
+            {/* Content brief -- real, saved AI-generated draft copy for
+                this specific opportunity (see lib/contentBrief.js). Not a
+                WordPress publish action -- there's nothing to review/stage
+                here, just an HTML block a strategist copies straight into
+                a blog editor's HTML view. Regenerating overwrites the
+                previous brief; there's no history kept beyond the latest. */}
+            {(o.status === 'open' || o.status === 'in_progress') && (
+              <div style={{ marginTop: 8 }}>
+                {o.content_brief ? (
+                  <details className="raw-details">
+                    <summary>
+                      Content brief: {o.content_brief.page_title}
+                      {o.content_brief.generated_at && (
+                        <span className="text-tiny text-muted"> -- generated {new Date(o.content_brief.generated_at).toLocaleDateString()}</span>
+                      )}
+                    </summary>
+                    <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
+                      <p className="text-tiny text-muted" style={{ margin: 0 }}>
+                        Suggested URL: /{o.content_brief.target_url_slug} &middot; Meta description: &ldquo;{o.content_brief.meta_description}&rdquo;
+                      </p>
+                      <p className="text-small" style={{ margin: 0 }}>{o.content_brief.angle}</p>
+                      {Array.isArray(o.content_brief.sections) && (
+                        <div className="issue-item" style={{ maxHeight: 320, overflowY: 'auto' }}>
+                          {o.content_brief.sections.map((s, i) => (
+                            <div key={i} style={{ marginBottom: 10 }}>
+                              <div className="text-tiny text-muted" style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3 }}>{s.heading_level}</div>
+                              <div style={{ fontWeight: 600, fontSize: 13, margin: '2px 0 4px' }}>{s.heading}</div>
+                              {/* Model-generated HTML, restricted by CONTENT_BRIEF_TOOL's
+                                  schema to a small safe tag allowlist (p/ul/li/strong/em) --
+                                  never raw user input, same trust boundary as this
+                                  project's other LLM-generated text fields. */}
+                              <div className="text-small" dangerouslySetInnerHTML={{ __html: s.content_html }} />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => generateBrief(o)}
+                        disabled={briefBusyId === o.id}
+                        className="btn btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: 12, justifySelf: 'start' }}
+                      >
+                        {briefBusyId === o.id ? 'Regenerating...' : 'Regenerate content brief'}
+                      </button>
+                    </div>
+                  </details>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => generateBrief(o)}
+                    disabled={briefBusyId === o.id}
+                    className="btn btn-secondary"
+                    style={{ padding: '4px 10px', fontSize: 12 }}
+                  >
+                    {briefBusyId === o.id ? 'Writing brief...' : 'Generate content brief'}
+                  </button>
+                )}
+                {briefErrors[o.id] && <p className="field-error" style={{ margin: '4px 0 0', fontSize: 12 }}>{briefErrors[o.id]}</p>}
+              </div>
+            )}
+
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               {STATUS_ORDER.filter(s => s !== o.status).map(s => (
                 <button
