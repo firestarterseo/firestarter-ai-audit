@@ -71,6 +71,24 @@ const GAP_RECOMMENDATIONS = {
   referring_domains: 'Prioritize link building (local citations, partnerships, press/guest content) -- referring domains are meaningfully behind tracked competitors, and this is one of the strongest authority signals both Google and AI answer engines weigh.'
 }
 
+// GAP_RATIO_ACTION_THRESHOLD -- 2026-08-17 fix. Must match
+// content-checker.js's own `worst.ratio < 0.9` cutoff for when it sets a
+// real gapRecommendation vs its "ahead of or in line with tracked
+// competitors" finding instead (see checkContentAuthority's gap-narrative
+// block). This wizard's step 2 tag already respected that cutoff
+// (gapStatusTag), but steps 3 and 4 didn't -- they generated a
+// "close this gap"/"create a task for this gap" recommendation and Asana
+// task-preview card for WHICHEVER gap card was selected, with no check on
+// whether that gap's own ratio actually clears the checker's bar for being
+// a real, actionable gap at all. Concretely: a client that's ahead or at
+// parity on all 3 signals still gets a `gaps[0]` entry (the least-ahead of
+// the three, sorted ascending) -- clicking through to step 4 on that entry
+// produced a fabricated task like "close the -3-domain referring-domains
+// gap" for a metric the client isn't actually behind on. Gating both steps
+// on the same threshold the real checker uses keeps every recommendation
+// and task preview honest about whether there's a real gap to act on.
+const GAP_RATIO_ACTION_THRESHOLD = 0.9
+
 // gapEvidenceLine(pillar, key) -- the one real evidence sentence for
 // whichever specific gap metric is selected, same regex-parse-real-evidence
 // pattern every stat-pill detail in this file already uses.
@@ -281,7 +299,20 @@ export default function ContentAuthorityWizard({ pillar }) {
 
       {step === 3 && (
         <div>
-          {activeGap ? (
+          {activeGap && activeGap.ratio >= GAP_RATIO_ACTION_THRESHOLD ? (
+            <div className="card" style={{ padding: 18 }}>
+              <div className="brief-title">{activeGap.label} -- at or near parity</div>
+              <div className="brief-meta">
+                {activeGap.clientValue} {activeGap.unit} vs {activeGap.competitorAvg} {activeGap.unit} average, across {activeGap.comparedCount} tracked competitor{activeGap.comparedCount === 1 ? '' : 's'} with comparable data this run.
+              </div>
+              <p className="text-small" style={{ margin: '10px 0 0' }}>
+                This isn&rsquo;t a real gap -- {activeGap.ratio >= 1 ? 'this client is already at or ahead of' : 'this client is within a few points of'} the tracked-competitor average on this specific signal ({Math.round(activeGap.ratio * 100)}% of average). It only shows up here because it&rsquo;s the least-ahead of the 3 signals checked, not because it needs fixing.
+              </p>
+              <p className="text-small" style={{ margin: '10px 0 0', color: 'var(--text)' }}>
+                <b>Recommendation:</b> No action needed on this specific signal -- see the other gap cards (step 2) for any that are a real competitive gap.
+              </p>
+            </div>
+          ) : activeGap ? (
             <div className="card" style={{ padding: 18 }}>
               <div className="brief-title">{activeGap.label} -- gap plan</div>
               <div className="brief-meta">
@@ -327,14 +358,16 @@ export default function ContentAuthorityWizard({ pillar }) {
           {Array.isArray(pillar?.issues) && pillar.issues.length > 0 && <IssuesList issues={pillar.issues} />}
           <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(2)}>&larr; Back</button>
-            <button className="btn btn-primary" onClick={() => setStep(4)}>Create Asana task &rarr;</button>
+            <button className="btn btn-primary" onClick={() => setStep(4)}>
+              {activeGap && activeGap.ratio >= GAP_RATIO_ACTION_THRESHOLD ? 'Continue →' : 'Create Asana task →'}
+            </button>
           </div>
         </div>
       )}
 
       {step === 4 && (
         <div>
-          {activeGap && (
+          {activeGap && activeGap.ratio < GAP_RATIO_ACTION_THRESHOLD && (
             <div className="asana-card">
               <div className="asana-card-top">
                 <span className="asana-icon">&#8801;</span>
@@ -349,6 +382,11 @@ export default function ContentAuthorityWizard({ pillar }) {
                 <span className="asana-meta-item">Assigned: {assignee}</span>
                 <span className="asana-meta-item">{dueDate ? `Due ${dueDate}` : 'Due --'}</span>
               </div>
+            </div>
+          )}
+          {activeGap && activeGap.ratio >= GAP_RATIO_ACTION_THRESHOLD && (
+            <div className="callout" style={{ marginBottom: 14 }}>
+              <b>No task created:</b> {activeGap.label.toLowerCase()} is at or near parity with tracked competitors this run ({Math.round(activeGap.ratio * 100)}% of average), so there's no real gap here to build a task for. Pick a different gap (step 2) if one of the other two is a genuine competitive gap this run.
             </div>
           )}
           {/* .callout, not .concept-banner -- true, real information about a
