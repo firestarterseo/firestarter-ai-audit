@@ -36,6 +36,60 @@ const STEP_LABELS = [
   'Verify'
 ]
 
+// Real 3-stat-pill Diagnosis row (2026-08-16) -- ports workflow-mockup.html's
+// #pane-schema Diagnosis step exactly (grade-row + stat-pill-row with
+// data-pill="failing"/"notfound"/"sitewide"), which is NOT the generic
+// grade-badge+CheckRow layout this file originally used. All 3 numbers are
+// real, sourced from lib/checkers/checker.js's `_raw` (persisted as
+// `pillar.raw`, same convention every other pillar's `_raw` already uses):
+//   - failing: checksPassing/checksTotal (checksTotal is always 7 today --
+//     see that file's header comment listing all 7 real checks).
+//   - notfound: businessEntityCount -- 0 means check #2 (Business entity
+//     schema) failed; >0 means it passed with that many distinct
+//     business-entity-type schema blocks found.
+//   - sitewide: sitemapPageCount -- a real sitemap.xml <loc> count, added
+//     alongside this Diagnosis rebuild specifically so this stat pill
+//     wouldn't have to stay the mockup's illustrative "5 pages." Renders
+//     "Not checked" (not a fake 0) when the sitemap fetch failed/no URL was
+//     available -- see countSitemapPages's own null-on-failure contract.
+//     Deliberately doesn't claim "coverage varies by page" the way the
+//     mockup's illustrative version does -- real per-page classification
+//     is still the not-yet-built Page coverage step (2/3 below).
+function schemaStatPills(pillar) {
+  const raw = pillar?.raw || {}
+  const checksTotal = typeof raw.checksTotal === 'number' ? raw.checksTotal : (pillar?.checks?.length ?? 7)
+  const checksPassing = typeof raw.checksPassing === 'number'
+    ? raw.checksPassing
+    : (pillar?.checks || []).filter(c => c.status === 'pass').length
+  const passRatio = checksTotal > 0 ? checksPassing / checksTotal : 0
+  const businessEntityCount = typeof raw.businessEntityCount === 'number' ? raw.businessEntityCount : null
+  const sitemapPageCount = typeof raw.sitemapPageCount === 'number' ? raw.sitemapPageCount : null
+
+  return [
+    {
+      key: 'failing',
+      tone: passRatio >= 0.85 ? 'good' : passRatio >= 0.5 ? 'caution' : 'bad',
+      eyebrow: passRatio >= 0.85 ? '▲ Passing' : '▼ Failing',
+      value: `${checksPassing} / ${checksTotal}`,
+      desc: 'homepage checks passing right now'
+    },
+    {
+      key: 'notfound',
+      tone: businessEntityCount === null ? null : businessEntityCount > 0 ? 'good' : 'gap',
+      eyebrow: businessEntityCount === null ? '● Not checked' : businessEntityCount > 0 ? '▲ Found' : '● Not found',
+      value: businessEntityCount === null ? '--' : String(businessEntityCount),
+      desc: 'business-entity schema (Organization / LocalBusiness)'
+    },
+    {
+      key: 'sitewide',
+      tone: sitemapPageCount === null ? null : 'caution',
+      eyebrow: sitemapPageCount === null ? '● Not checked' : '● Site-wide',
+      value: sitemapPageCount === null ? 'Not checked' : `${sitemapPageCount} page${sitemapPageCount === 1 ? '' : 's'}`,
+      desc: sitemapPageCount === null ? 'sitemap.xml not reachable this run' : 'found in sitemap.xml -- per-page checks not yet built'
+    }
+  ]
+}
+
 // Literal duplicate of PillarsBoard.js's own gradeClass -- same "small,
 // pure helper, not worth a cross-module dependency for" reasoning this
 // project's backend checkers already use for things like scoreToGrade.
@@ -68,6 +122,8 @@ function NotBuiltStep({ title, note, onBack, onNext }) {
 
 export default function SchemaWizard({ pillar, clientId, client }) {
   const [step, setStep] = useState(1)
+  const [selectedPill, setSelectedPill] = useState(null)
+  const pills = pillar ? schemaStatPills(pillar) : []
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
@@ -100,8 +156,39 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                   {pillar.finding && <div className="grade-sub">{pillar.finding}</div>}
                 </div>
               </div>
-              <CheckRow checks={pillar.checks} />
-              {Array.isArray(pillar.issues) && pillar.issues.length > 0 && <IssuesList issues={pillar.issues} />}
+              <div className="stat-pill-row">
+                {pills.map(p => (
+                  <div
+                    key={p.key}
+                    className={`stat-pill clickable${p.tone ? ` ${p.tone}` : ''}${selectedPill === p.key ? ' active' : ''}`}
+                    onClick={() => setSelectedPill(k => k === p.key ? null : p.key)}
+                  >
+                    <div className="eyebrow">{p.eyebrow}</div>
+                    <div className="v">{p.value}</div>
+                    <div className="d">{p.desc}</div>
+                  </div>
+                ))}
+              </div>
+              {selectedPill && (
+                <div className="pill-detail show">
+                  {selectedPill === 'failing' && <CheckRow checks={pillar.checks} />}
+                  {selectedPill === 'notfound' && (
+                    <p className="pd-lead" style={{ margin: 0 }}>
+                      {pillar.raw?.businessEntityCount > 0
+                        ? `${pillar.raw.businessEntityCount} business-entity schema block(s) found (${(pillar.raw.schemasFound || []).join(', ') || 'see raw evidence below'}).`
+                        : 'No LocalBusiness/Organization-style schema found -- this is the single biggest lever for showing up correctly in AI answers and local search.'}
+                    </p>
+                  )}
+                  {selectedPill === 'sitewide' && (
+                    <p className="pd-lead" style={{ margin: 0 }}>
+                      {pillar.raw?.sitemapPageCount != null
+                        ? `sitemap.xml lists ${pillar.raw.sitemapPageCount} page(s). Only the homepage is actually checked for schema today -- classifying and checking every page individually is the Page coverage step below, not yet built.`
+                        : "sitemap.xml wasn't reachable on the most recent run, so this couldn't be counted -- not the same as zero pages."}
+                    </p>
+                  )}
+                </div>
+              )}
+              {Array.isArray(pillar.issues) && pillar.issues.length > 0 && !selectedPill && <IssuesList issues={pillar.issues} />}
             </div>
           ) : (
             <div className="card-empty" style={{ padding: 18 }}>

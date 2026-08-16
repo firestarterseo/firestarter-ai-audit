@@ -196,7 +196,7 @@ p, span, div, label, input, select, textarea, button {
   border-radius: var(--radius);
 }
 
-/* ---------- Overall score + pillar tiles (dashboard view) ---------- */
+/* ---------- Overall score tile ---------- */
 
 .overall-tile {
   display: flex;
@@ -210,87 +210,58 @@ p, span, div, label, input, select, textarea, button {
   margin-bottom: 14px;
 }
 
-/* Fixed 3-column grid, not auto-fill -- there are exactly 6 pillars today
-   (see PILLAR_ORDER in page.js) and auto-fill(minmax(180px,1fr)) was
-   fitting 5 per row at this app's typical container width, leaving the 6th
-   tile (Competitive Position) stranded alone on its own row. A fixed
-   3-column grid always lays out 6 tiles as a clean 2x3, regardless of
-   container width, without needing to track the pillar count here. Direct
-   fix for a real layout bug flagged 2026-08-16, not just a style
-   preference. */
-.pillar-tile-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-bottom: 12px;
-}
+/* ---------- Top-level pillar tabs ----------
+   Ported directly from workflow-mockup.html's .toplevel-tabs (2026-08-16).
+   REPLACES the tile-grid/pillar-tile classes that used to render all 6
+   pillars as a grid of clickable summary cards with an expand-in-place
+   accordion below (PillarsBoard.js) -- that whole approach diverged from
+   the prototype's real shell (one active pane, switched via a plain tab
+   bar), and its own CSS grid was a source of an earlier bug (a 5-then-1
+   wrap at this app's typical width). Removed rather than left dead. */
 
-@media (max-width: 860px) {
-  .pillar-tile-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 520px) {
-  .pillar-tile-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.pillar-tile {
+.toplevel-tabs {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  background: var(--white);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-sm);
-  padding: 14px 16px;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  flex-wrap: wrap;
+  row-gap: 8px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.toplevel-tabs button {
+  background: none;
+  border: none;
+  padding: 10px 4px;
+  margin-right: 20px;
   font-family: inherit;
-}
-
-.pillar-tile:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
-}
-
-.pillar-tile.expanded {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
-}
-
-.pillar-tile-top {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
 }
 
-.pillar-tile-chevron {
-  margin-left: auto;
+.toplevel-tabs button .idx {
+  font-size: 10px;
   color: var(--muted-2);
-  transition: transform 0.15s ease;
-  flex-shrink: 0;
+  font-weight: 700;
 }
 
-.pillar-tile.expanded .pillar-tile-chevron {
-  transform: rotate(90deg);
-  color: var(--muted);
-}
+.toplevel-tabs button.active { color: var(--text); border-bottom-color: var(--orange); }
 
-.pillar-tile-status {
-  font-size: 12.5px;
-  color: var(--muted);
-  line-height: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
+/* "proposed" -- a pillar that's a concept/not real yet (see .concept-badge/
+   .concept-banner) gets a dashed underline instead of the solid orange
+   active state, even when selected. Unused today (NOT_YET_BUILT in
+   page.js is currently empty -- Entity & Citation Authority is real, not
+   a port of the mockup's illustrative GBP/Person-schema concept), kept
+   for the next genuinely-not-built pillar that comes along. */
+.toplevel-tabs button.proposed { color: var(--muted-2); }
+.toplevel-tabs button.proposed.active { color: var(--text); border-bottom-color: var(--muted-2); border-bottom-style: dashed; }
 
 .list-row {
   display: flex;

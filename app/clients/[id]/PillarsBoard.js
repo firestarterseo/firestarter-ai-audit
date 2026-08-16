@@ -29,26 +29,6 @@ function gradeClass(grade) {
   return 'grade-f'
 }
 
-// A short, scannable line for the collapsed tile -- counts real
-// (critical/moderate/minor) issues distinctly from "info" ones, which mean
-// a data gap (no API key configured, etc.), not the site actually failing
-// something, same distinction the old fully-expanded view already made.
-function oneLinerStatus(pillar, notYetBuilt) {
-  if (notYetBuilt) return 'Not yet built -- blocked on a vendor decision.'
-  if (!pillar) return 'Not yet audited.'
-  if (pillar.grade == null) return 'Not yet graded -- excluded from overall score.'
-  const issues = Array.isArray(pillar.issues) ? pillar.issues : []
-  const real = issues.filter(i => i.severity && i.severity !== 'info')
-  if (real.length > 0) {
-    const counts = { critical: 0, moderate: 0, minor: 0 }
-    real.forEach(i => { counts[i.severity] = (counts[i.severity] || 0) + 1 })
-    const parts = ['critical', 'moderate', 'minor'].filter(s => counts[s]).map(s => `${counts[s]} ${s}`)
-    return `${parts.join(', ')} issue${real.length === 1 ? '' : 's'}`
-  }
-  if (issues.length > 0) return `${issues.length} data gap${issues.length === 1 ? '' : 's'} -- not verified.`
-  return pillar.finding || 'No issues found.'
-}
-
 const CHECK_ICON = { pass: '✓', partial: '✗', fail: '✗', not_verified: '–' }
 const CHECK_COLOR = { pass: 'var(--grade-a)', partial: 'var(--grade-d)', fail: 'var(--grade-f)', not_verified: 'var(--grade-none)' }
 
@@ -240,62 +220,62 @@ function PillarDetail({ pillarKey, label, pillar, notYetBuilt, children }) {
   )
 }
 
-export default function PillarsBoard({ pillars, defaultExpanded = [] }) {
-  // Single-open accordion, not independent per-tile toggles: opening a
-  // second pillar closes whichever one was open. Per direct feedback --
-  // clicking through several tiles was leaving all of them expanded at
-  // once, back to the same long-scroll problem this redesign was meant to
-  // fix. `expandedKey` is the one open pillar's key, or null.
-  const [expandedKey, setExpandedKey] = useState(defaultExpanded[0] ?? null)
-
-  function toggle(key) {
-    setExpandedKey(k => (k === key ? null : key))
-  }
+// 2026-08-16: replaced the tile-grid + expand-in-place accordion with the
+// prototype's actual top-level tab bar (workflow-mockup.html's
+// .toplevel-tabs -- one pane visible at a time, switched by clicking a
+// tab), per direct instruction to standardize on the prototype's real
+// shell rather than a similar-but-different bespoke layout. This also
+// retires the tile-grid's own real layout bug (a fixed 3-column grid was
+// a stopgap fix for 6 tiles wrapping 5-then-1; a tab bar has no such
+// wrapping problem at all, at any pillar count).
+//
+// Trade-off worth knowing about: the tile grid showed every pillar's grade
+// at a glance without clicking into each one; the prototype's tabs don't
+// (its tabs are plain index + label, no grade badge -- confirmed directly
+// against the mockup's own CSS/markup, not assumed). This port matches
+// that exactly rather than inventing a hybrid. The "Overall Score" tile
+// above the tabs (unchanged, not part of the prototype, kept because it
+// predates this redesign and doesn't conflict with it) still gives an
+// at-a-glance read on the client overall; if losing per-pillar at-a-glance
+// grades turns out to matter in practice, a small grade indicator could be
+// added back onto each tab without touching this structure.
+export default function PillarsBoard({ pillars, defaultActive }) {
+  const [activeKey, setActiveKey] = useState(defaultActive ?? pillars[0]?.key ?? null)
+  const active = pillars.find(p => p.key === activeKey) || pillars[0]
 
   return (
     <>
-      <div className="pillar-tile-grid">
-        {pillars.map(p => (
+      <div className="toplevel-tabs">
+        {pillars.map((p, i) => (
           <button
             key={p.key}
             type="button"
-            className={`pillar-tile${expandedKey === p.key ? ' expanded' : ''}`}
-            onClick={() => toggle(p.key)}
-            aria-expanded={expandedKey === p.key}
+            className={`${p.notYetBuilt ? 'proposed' : ''}${activeKey === p.key ? ' active' : ''}`.trim() || undefined}
+            onClick={() => setActiveKey(p.key)}
           >
-            <div className="pillar-tile-top">
-              <div className={`grade-badge ${gradeClass(p.pillar?.grade)}`} style={{ width: 30, height: 30, fontSize: 12 }}>
-                {p.notYetBuilt ? '–' : (p.pillar?.grade || '--')}
-              </div>
-              <div style={{ fontWeight: 600, fontSize: 13 }}>{p.label}</div>
-              <svg className="pillar-tile-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-            </div>
-            <div className="pillar-tile-status">{oneLinerStatus(p.pillar, p.notYetBuilt)}</div>
+            <span className="idx">{i + 1}</span> {p.label}
+            {p.notYetBuilt && <span className="concept-badge">concept</span>}
           </button>
         ))}
       </div>
 
-      <div style={{ display: 'grid', gap: 12 }}>
-        {pillars.filter(p => p.key === expandedKey).map(p => (
-          // customDetail (Phase 3) lets a specific pillar (e.g. Schema &
-          // Structure's step-by-step wizard) fully replace the generic
-          // grade-badge/checks/issues rendering below, instead of just
-          // appending extra content via `children` on top of it. Built in
-          // page.js (a Server Component, same place `children` is already
-          // resolved) so this Client Component still never needs to know
-          // what SchemaWizard/etc. actually are -- same "just some JSX"
-          // contract `children` already established.
-          p.customDetail
-            ? <div key={p.key}>{p.customDetail}</div>
-            : (
-              <PillarDetail key={p.key} pillarKey={p.key} label={p.label} pillar={p.pillar} notYetBuilt={p.notYetBuilt}>
-                {p.children}
-              </PillarDetail>
-            )
-        ))}
-      </div>
+      {active && (
+        // customDetail (Phase 3) lets a specific pillar (e.g. Schema &
+        // Structure's step-by-step wizard) fully replace the generic
+        // grade-badge/checks/issues rendering below, instead of just
+        // appending extra content via `children` on top of it. Built in
+        // page.js (a Server Component, same place `children` is already
+        // resolved) so this Client Component still never needs to know
+        // what SchemaWizard/etc. actually are -- same "just some JSX"
+        // contract `children` already established.
+        active.customDetail
+          ? <div key={active.key}>{active.customDetail}</div>
+          : (
+            <PillarDetail key={active.key} pillarKey={active.key} label={active.label} pillar={active.pillar} notYetBuilt={active.notYetBuilt}>
+              {active.children}
+            </PillarDetail>
+          )
+      )}
     </>
   )
 }
