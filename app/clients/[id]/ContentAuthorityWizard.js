@@ -54,6 +54,34 @@ function gapStatusTag(ratio) {
 
 const GAP_TAG_LABEL = { good: 'At or ahead', watch: 'Close', gap: 'Biggest gap' }
 
+// GAP_RECOMMENDATIONS -- 2026-08-16. Literal copy of
+// lib/checkers/content-checker.js's own private GAP_RECOMMENDATIONS map
+// (that file's `worst.key`-keyed object, same 3 sentences verbatim). The
+// checker only ever folds ONE gap's recommendation (whichever ranks worst
+// that run) into the single combined `pillar.recommendation` string -- there
+// was no way to show a DIFFERENT gap's real recommendation if a strategist
+// clicked a card that wasn't the worst one. Duplicating this static,
+// already-real map client-side (same "small pure helper, not worth a
+// cross-module dependency for" pattern gradeClass already uses everywhere
+// in this project) makes every gap's detail real and correct regardless of
+// which card is selected, without inventing new copy.
+const GAP_RECOMMENDATIONS = {
+  word_count: 'Expand key page content -- word count is meaningfully behind tracked competitors, which likely means less substantive material for Google and AI engines to draw from relative to them.',
+  freshness: 'Publish more often -- tracked competitors are updating more recently on average, and content freshness is a real signal of an actively maintained site to both Google and AI systems.',
+  referring_domains: 'Prioritize link building (local citations, partnerships, press/guest content) -- referring domains are meaningfully behind tracked competitors, and this is one of the strongest authority signals both Google and AI answer engines weigh.'
+}
+
+// gapEvidenceLine(pillar, key) -- the one real evidence sentence for
+// whichever specific gap metric is selected, same regex-parse-real-evidence
+// pattern every stat-pill detail in this file already uses.
+function gapEvidenceLine(pillar, key) {
+  const evidence = pillar?.evidence || []
+  if (key === 'word_count') return evidence.find(e => /average \d+ words\/page/i.test(e)) || null
+  if (key === 'freshness') return evidence.find(e => /days ago\)/i.test(e)) || null
+  if (key === 'referring_domains') return evidence.find(e => /live referring domain/i.test(e)) || null
+  return null
+}
+
 // contentStatPills(pillar) -- 2026-08-16, same fix as
 // TechnicalFoundationWizard.js's technicalStatPills: Diagnosis step 1 was
 // rendering the generic CheckRow/IssuesList "AI slop" list instead of the
@@ -128,6 +156,17 @@ export default function ContentAuthorityWizard({ pillar }) {
   const [selectedPill, setSelectedPill] = useState(null)
   const gaps = Array.isArray(pillar?.raw?.contentGaps) ? pillar.raw.contentGaps : []
   const pills = pillar ? contentStatPills(pillar) : []
+  // selectedGap -- 2026-08-16 fix: workflow-mockup.html's #pane-content step 2
+  // has each cluster-card call selectGap(this,'referring'|'freshness'|'thin')
+  // to drive what step 3 ("Gap detail") shows next. This wizard had no
+  // equivalent state at all -- step 3 rendered the exact same generic
+  // "what to do next" text no matter which gap card was clicked in step 2,
+  // silently dropping the one interactive part of this workflow. Defaults to
+  // the worst-ranked real gap (gaps[0], already the "selected" card below),
+  // same default the mockup itself uses.
+  const [selectedGap, setSelectedGap] = useState(null)
+  const activeGapKey = selectedGap || gaps[0]?.key || null
+  const activeGap = gaps.find(g => g.key === activeGapKey) || null
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
@@ -203,7 +242,11 @@ export default function ContentAuthorityWizard({ pillar }) {
               {gaps.map(g => {
                 const tag = gapStatusTag(g.ratio)
                 return (
-                  <div key={g.key} className="cluster-card">
+                  <div
+                    key={g.key}
+                    className={`cluster-card${activeGapKey === g.key ? ' selected' : ''}`}
+                    onClick={() => setSelectedGap(g.key)}
+                  >
                     <div className="name">{g.label}</div>
                     <div className="meta">
                       {g.clientValue} {g.unit} vs. {g.competitorAvg} {g.unit} avg
@@ -225,22 +268,37 @@ export default function ContentAuthorityWizard({ pillar }) {
           )}
           <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(1)}>&larr; Back</button>
-            <button className="btn btn-primary" onClick={() => setStep(3)}>See gap detail &rarr;</button>
+            <button className="btn btn-primary" onClick={() => setStep(3)}>See gap plan &rarr;</button>
           </div>
         </div>
       )}
 
       {step === 3 && (
         <div>
-          <div className="card" style={{ padding: 18 }}>
-            <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 14 }}>What to do next</div>
-            <p className="text-small" style={{ margin: '0 0 0' }}>{pillar?.finding || 'Not yet audited.'}</p>
-            {pillar?.recommendation && (
-              <p className="text-small" style={{ margin: '10px 0 0', color: 'var(--text)' }}>
-                <b>Recommendation:</b> {pillar.recommendation}
+          {activeGap ? (
+            <div className="card" style={{ padding: 18 }}>
+              <div className="brief-title">{activeGap.label} -- gap plan</div>
+              <div className="brief-meta">
+                {activeGap.clientValue} {activeGap.unit} vs {activeGap.competitorAvg} {activeGap.unit} average, across {activeGap.comparedCount} tracked competitor{activeGap.comparedCount === 1 ? '' : 's'} with comparable data this run.
+              </div>
+              <p className="text-small" style={{ margin: '10px 0 0' }}>
+                {gapEvidenceLine(pillar, activeGap.key) || 'Not checked on the most recent run.'}
               </p>
-            )}
-          </div>
+              <p className="text-small" style={{ margin: '10px 0 0', color: 'var(--text)' }}>
+                <b>Recommendation:</b> {GAP_RECOMMENDATIONS[activeGap.key] || 'Close this gap relative to tracked competitors.'}
+              </p>
+            </div>
+          ) : (
+            <div className="card" style={{ padding: 18 }}>
+              <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 14 }}>What to do next</div>
+              <p className="text-small" style={{ margin: '0 0 0' }}>{pillar?.finding || 'Not yet audited.'}</p>
+              {pillar?.recommendation && (
+                <p className="text-small" style={{ margin: '10px 0 0', color: 'var(--text)' }}>
+                  <b>Recommendation:</b> {pillar.recommendation}
+                </p>
+              )}
+            </div>
+          )}
           {Array.isArray(pillar?.issues) && pillar.issues.length > 0 && <IssuesList issues={pillar.issues} />}
           <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(2)}>&larr; Back</button>
