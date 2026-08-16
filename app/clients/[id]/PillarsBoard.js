@@ -52,7 +52,10 @@ function oneLinerStatus(pillar, notYetBuilt) {
 const CHECK_ICON = { pass: '✓', partial: '✗', fail: '✗', not_verified: '–' }
 const CHECK_COLOR = { pass: 'var(--grade-a)', partial: 'var(--grade-d)', fail: 'var(--grade-f)', not_verified: 'var(--grade-none)' }
 
-function CheckRow({ checks }) {
+// Exported (Phase 3) so SchemaWizard.js can reuse the exact same check/
+// issue rendering for its Diagnosis step instead of re-implementing it --
+// same real pillar.checks/pillar.issues shape either way.
+export function CheckRow({ checks }) {
   if (!Array.isArray(checks) || checks.length === 0) return null
   return (
     <div style={{ display: 'grid', gap: 5, margin: '10px 0' }}>
@@ -77,7 +80,7 @@ function CheckRow({ checks }) {
 const ISSUE_SEVERITY_RANK = { critical: 0, moderate: 1, minor: 2, info: 3 }
 const ISSUE_SEVERITY_LABEL = { critical: 'Critical', moderate: 'Moderate', minor: 'Minor', info: 'Not verified' }
 
-function IssuesList({ issues }) {
+export function IssuesList({ issues }) {
   if (!Array.isArray(issues) || issues.length === 0) return null
   const sorted = [...issues].sort((a, b) => (ISSUE_SEVERITY_RANK[a.severity] ?? 4) - (ISSUE_SEVERITY_RANK[b.severity] ?? 4))
   return (
@@ -276,9 +279,21 @@ export default function PillarsBoard({ pillars, defaultExpanded = [] }) {
 
       <div style={{ display: 'grid', gap: 12 }}>
         {pillars.filter(p => p.key === expandedKey).map(p => (
-          <PillarDetail key={p.key} pillarKey={p.key} label={p.label} pillar={p.pillar} notYetBuilt={p.notYetBuilt}>
-            {p.children}
-          </PillarDetail>
+          // customDetail (Phase 3) lets a specific pillar (e.g. Schema &
+          // Structure's step-by-step wizard) fully replace the generic
+          // grade-badge/checks/issues rendering below, instead of just
+          // appending extra content via `children` on top of it. Built in
+          // page.js (a Server Component, same place `children` is already
+          // resolved) so this Client Component still never needs to know
+          // what SchemaWizard/etc. actually are -- same "just some JSX"
+          // contract `children` already established.
+          p.customDetail
+            ? <div key={p.key}>{p.customDetail}</div>
+            : (
+              <PillarDetail key={p.key} pillarKey={p.key} label={p.label} pillar={p.pillar} notYetBuilt={p.notYetBuilt}>
+                {p.children}
+              </PillarDetail>
+            )
         ))}
       </div>
     </>

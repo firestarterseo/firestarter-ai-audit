@@ -4,7 +4,7 @@ import RunAuditButton from './RunAuditButton'
 import PromptTester from './PromptTester'
 import TestPromptsManager from './TestPromptsManager'
 import ClientActions from './ClientActions'
-import SchemaGenerator from './SchemaGenerator'
+import SchemaWizard from './SchemaWizard'
 import CompetitorsManager from './CompetitorsManager'
 import OpportunitiesManager from './OpportunitiesManager'
 import PillarsBoard from './PillarsBoard'
@@ -129,21 +129,27 @@ export default async function ClientDetailPage({ params }) {
     label: PILLAR_LABELS[key],
     pillar: pillarsByKey.get(key),
     notYetBuilt: NOT_YET_BUILT.has(key),
+    // customDetail (Phase 3) -- Schema & Structure fully replaces the
+    // generic grade-badge/checks/issues card with its own step-by-step
+    // wizard (see SchemaWizard.js) instead of just appending SchemaGenerator
+    // below it via `children` the way the other pillars below do. Built
+    // here rather than inside PillarsBoard.js so that Client Component
+    // still never needs to know what a "pillar" actually looks like -- see
+    // that file's own comment on this.
+    customDetail: key === 'schema_structure'
+      ? (
+        // sanitizeClient strips the encrypted WordPress credential -- see
+        // lib/data.js -- before this crosses into a Client Component's
+        // props. Only `wp_connected` (a boolean) needs to reach the browser.
+        <SchemaWizard pillar={pillarsByKey.get(key)} clientId={client.id} client={sanitizeClient(client)} />
+      )
+      : null,
     children: (
       <>
         {key === 'ai_geo_visibility' && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)', display: 'grid', gap: 14 }}>
             <TestPromptsManager clientId={client.id} savedPrompts={client.test_prompts} bare />
             <PromptTester clientId={client.id} bare />
-          </div>
-        )}
-        {key === 'schema_structure' && (
-          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-            {/* sanitizeClient strips the encrypted WordPress credential --
-                see lib/data.js -- before this crosses into a Client
-                Component's props. Only `wp_connected` (a boolean) needs
-                to reach the browser. */}
-            <SchemaGenerator clientId={client.id} client={sanitizeClient(client)} bare />
           </div>
         )}
         {key === 'competitive_position' && (

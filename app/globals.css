@@ -433,6 +433,65 @@ p, span, div, label, input, select, textarea, button {
   margin-top: 8px;
 }
 
+/* ---------- Wizard step nav (Schema & Structure pillar, Phase 3) ---------- */
+
+.wizard-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.wizard-step-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.wizard-step-chip:hover {
+  border-color: var(--border-strong);
+}
+
+.wizard-step-chip.active {
+  background: var(--white);
+  border-color: var(--orange);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+.wizard-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted-2);
+  color: var(--white);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.wizard-step-chip.active .wizard-step-num {
+  background: var(--grad);
+}
+
+.wizard-cta-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
 /* ---------- Loading spinner (audit-running overlay) ---------- */
 
 .audit-spinner {

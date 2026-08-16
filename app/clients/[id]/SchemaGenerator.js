@@ -17,7 +17,19 @@ import { BUSINESS_ENTITY_TYPES } from '../../../lib/businessEntityTypes'
 // the site already has the answer. Fields that came from auto-detection
 // are labeled as such; anything already saved on the client record is left
 // alone.
-export default function SchemaGenerator({ clientId, client, bare = false }) {
+// visibleSection ('form' | 'publish' | 'verify' | undefined) -- added for
+// SchemaWizard.js's step-by-step UI (Phase 3): lets the wizard show only
+// one slice of this component per step (Generate & review / Publish /
+// Verify) while keeping a SINGLE mounted instance across all three steps,
+// so its state (fetched schema preview, WordPress connection, live-status
+// check result) survives navigating back and forth between those steps
+// instead of re-fetching/resetting on every step change. undefined (the
+// default, and every call site before this wizard existed) shows all three
+// sections at once, unchanged from this component's original behavior.
+export default function SchemaGenerator({ clientId, client, bare = false, visibleSection }) {
+  const showForm = !visibleSection || visibleSection === 'form'
+  const showPublish = !visibleSection || visibleSection === 'publish'
+  const showVerify = !visibleSection || visibleSection === 'verify'
   const router = useRouter()
   const [form, setForm] = useState({
     street_address: client.street_address || '',
@@ -247,6 +259,8 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
 
   return (
     <div className={bare ? undefined : 'card'} style={bare ? undefined : { padding: 18 }}>
+      {showForm && (
+        <>
       <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Schema Generator</div>
       <p className="text-small text-muted" style={{ margin: '0 0 14px' }}>
         Generates a real, valid {form.schema_type} JSON-LD block from this client's own business
@@ -327,9 +341,13 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
       </div>
 
       {error && <p className="field-error" style={{ marginTop: 12 }}>{error}</p>}
+        </>
+      )}
 
-      {result && !loading && (
-        <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
+      {result && !loading && (showForm || showPublish || showVerify) && (
+        <div style={showForm ? { marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border)' } : undefined}>
+          {showForm && (
+            <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <div
               className={`grade-badge ${result.preview.grade?.startsWith('A') ? 'grade-a' : result.preview.grade?.startsWith('B') ? 'grade-b' : result.preview.grade?.startsWith('C') ? 'grade-c' : result.preview.grade?.startsWith('D') ? 'grade-d' : 'grade-f'}`}
@@ -373,8 +391,13 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
               Download snippet (.html)
             </button>
           </div>
+            </>
+          )}
 
-          <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
+          {(showPublish || showVerify) && (
+          <div style={showForm ? { marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border)' } : undefined}>
+            {showPublish && (
+              <>
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Publish to WordPress</div>
             <p className="text-small text-muted" style={{ margin: '0 0 12px' }}>
               For sites this tool can auto-update instead of pasting a snippet by hand: install the{' '}
@@ -423,9 +446,6 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
                 <button className="btn btn-primary" disabled={wpPublishing} onClick={publishToWordPress}>
                   {wpPublishing ? 'Publishing...' : 'Publish to WordPress'}
                 </button>
-                <button className="btn btn-secondary" disabled={wpChecking} onClick={checkWordPressStatus}>
-                  {wpChecking ? 'Checking...' : 'Check live status'}
-                </button>
                 <button className="btn btn-secondary" disabled={wpConnecting} onClick={disconnectWordPress}>
                   Disconnect
                 </button>
@@ -440,35 +460,55 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
                 {wpMessage.text}
               </p>
             )}
+              </>
+            )}
 
-            {wpStatus && (
-              <div className="issue-item" style={{ marginTop: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-                  <span
-                    className="issue-badge"
-                    style={{ background: !wpStatus.connected ? 'var(--grade-f)' : wpStatus.hasSchema ? 'var(--grade-a)' : 'var(--grade-d)' }}
-                  >
-                    {!wpStatus.connected ? 'Live check failed' : wpStatus.hasSchema ? 'Confirmed live' : 'Reachable -- not live yet'}
-                  </span>
-                  <span className="text-tiny text-muted">GET /wp-json/firestarter-schema/v1/status</span>
-                </div>
-                {wpStatus.connected ? (
-                  <p className="text-small" style={{ margin: 0 }}>
-                    {wpStatus.hasSchema
-                      ? "This exact schema is live in the site's <head> right now"
-                      : 'The plugin is reachable, but no schema has been published yet'}
-                    {wpStatus.updatedAt && ` -- last updated ${new Date(wpStatus.updatedAt).toLocaleString()}`}
-                  </p>
+            {/* Verify -- moved out of the Publish button row (Phase 3) so
+                SchemaWizard.js can show this as its own step-panel. Requires
+                a connection to mean anything -- there's nothing to verify
+                until schema has actually been published somewhere. */}
+            {showVerify && (
+              <div style={showPublish ? { marginTop: 18, paddingTop: 18, borderTop: '1px solid var(--border)' } : undefined}>
+                {!wpConnected ? (
+                  <p className="text-small text-muted">Connect WordPress in the Publish step first -- there's nothing to verify until schema has actually been published somewhere.</p>
                 ) : (
-                  <p className="text-small" style={{ margin: 0, color: 'var(--red)' }}>{wpStatus.error || 'Could not reach the site.'}</p>
+                  <>
+                    <button className="btn btn-secondary" disabled={wpChecking} onClick={checkWordPressStatus}>
+                      {wpChecking ? 'Checking...' : (wpStatus ? 'Re-check status' : 'Check live status')}
+                    </button>
+                    {wpStatus && (
+                      <div className="issue-item" style={{ marginTop: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                          <span
+                            className="issue-badge"
+                            style={{ background: !wpStatus.connected ? 'var(--grade-f)' : wpStatus.hasSchema ? 'var(--grade-a)' : 'var(--grade-d)' }}
+                          >
+                            {!wpStatus.connected ? 'Live check failed' : wpStatus.hasSchema ? 'Confirmed live' : 'Reachable -- not live yet'}
+                          </span>
+                          <span className="text-tiny text-muted">GET /wp-json/firestarter-schema/v1/status</span>
+                        </div>
+                        {wpStatus.connected ? (
+                          <p className="text-small" style={{ margin: 0 }}>
+                            {wpStatus.hasSchema
+                              ? "This exact schema is live in the site's <head> right now"
+                              : 'The plugin is reachable, but no schema has been published yet'}
+                            {wpStatus.updatedAt && ` -- last updated ${new Date(wpStatus.updatedAt).toLocaleString()}`}
+                          </p>
+                        ) : (
+                          <p className="text-small" style={{ margin: 0, color: 'var(--red)' }}>{wpStatus.error || 'Could not reach the site.'}</p>
+                        )}
+                        <p className="text-tiny text-muted" style={{ margin: '6px 0 0' }}>
+                          Unlike pillars that only know their real state as of the last scheduled audit, this checks the live site directly -- no
+                          need to wait for the next run to confirm a fix actually took.
+                        </p>
+                      </div>
+                    )}
+                  </>
                 )}
-                <p className="text-tiny text-muted" style={{ margin: '6px 0 0' }}>
-                  Unlike pillars that only know their real state as of the last scheduled audit, this checks the live site directly -- no
-                  need to wait for the next run to confirm a fix actually took.
-                </p>
               </div>
             )}
           </div>
+          )}
         </div>
       )}
     </div>
