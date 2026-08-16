@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckRow, IssuesList } from './PillarsBoard'
+import { CheckRow, IssuesList, pillarHeadline } from './PillarsBoard'
 import TechnicalDevAssignee from './TechnicalDevAssignee'
 
 // Technical Foundation's wizard-style pillar detail -- same port pattern
@@ -103,7 +103,7 @@ export default function TechnicalFoundationWizard({ pillar, clientId, defaultDev
                   {pillar.grade || '--'}
                 </div>
                 <div>
-                  <div className="grade-title">Technical Foundation</div>
+                  <div className="grade-title">{pillarHeadline('Technical Foundation', pillar)}</div>
                   {pillar.finding && <div className="grade-sub">{pillar.finding}</div>}
                 </div>
               </div>

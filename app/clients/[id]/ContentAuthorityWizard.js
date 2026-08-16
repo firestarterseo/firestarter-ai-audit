@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckRow, IssuesList } from './PillarsBoard'
+import { CheckRow, IssuesList, pillarHeadline } from './PillarsBoard'
 
 // Content Authority's wizard-style pillar detail -- same port pattern
 // SchemaWizard.js / TechnicalFoundationWizard.js established, applied to
@@ -85,7 +85,7 @@ export default function ContentAuthorityWizard({ pillar }) {
                   {pillar.grade || '--'}
                 </div>
                 <div>
-                  <div className="grade-title">Content Authority</div>
+                  <div className="grade-title">{pillarHeadline('Content Authority', pillar)}</div>
                   {pillar.finding && <div className="grade-sub">{pillar.finding}</div>}
                 </div>
               </div>

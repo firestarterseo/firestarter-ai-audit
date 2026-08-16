@@ -29,6 +29,45 @@ function gradeClass(grade) {
   return 'grade-f'
 }
 
+// pillarHeadline(label, pillar) -- 2026-08-16.
+//
+// Every wizard's Diagnosis step (Schema/Technical/Content) was putting the
+// bare pillar label ("Schema & Structure") in .grade-title and the real
+// finding sentence in .grade-sub underneath -- but workflow-mockup.html's
+// actual pattern is the reverse emphasis: .grade-title carries a short,
+// specific verdict ("Schema & Structure — a partial picture, not a blank
+// one", "Content Authority — content is fine, link authority isn't"), and
+// .grade-sub is the one supporting sentence below it. Flattening every
+// pillar's headline to its bare name was a real interface gap, not a data
+// one -- this is what a strategist actually scans first, and it was giving
+// them nothing.
+//
+// Built entirely from real pillar.checks/pillar.issues (same data every
+// wizard already has), never invented copy:
+//   - every check passing -> a clean-sweep phrase
+//   - exactly one check failing among several passing -> names that one
+//     check specifically, contrasted with everything else passing -- this
+//     is what produces the mockup's own "X is fine, Y isn't" contrast
+//     pattern, just grounded in whichever single check actually failed
+//     rather than a fixed example
+//   - more than one failing (or none passing) -> a generic-but-honest
+//     partial/critical-gap phrase, since naming just one of several real
+//     gaps would be cherry-picking
+export function pillarHeadline(label, pillar) {
+  const checks = pillar?.checks || []
+  if (!checks.length) return label
+  const passing = checks.filter(c => c.status === 'pass')
+  const failing = checks.filter(c => c.status === 'fail')
+  if (failing.length === 0) return `${label} — clean and complete`
+  if (failing.length === checks.length) return `${label} — no ground covered yet`
+  if (failing.length === 1 && passing.length > 0) {
+    return `${label} — everything else checks out, but ${failing[0].label.toLowerCase()} doesn't`
+  }
+  const topIssue = (pillar?.issues || [])[0]
+  if (topIssue?.severity === 'critical') return `${label} — a critical gap, not just polish`
+  return `${label} — a partial picture, not a blank one`
+}
+
 const CHECK_ICON = { pass: '✓', partial: '✗', fail: '✗', not_verified: '–' }
 const CHECK_COLOR = { pass: 'var(--grade-a)', partial: 'var(--grade-d)', fail: 'var(--grade-f)', not_verified: 'var(--grade-none)' }
 

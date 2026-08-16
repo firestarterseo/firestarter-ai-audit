@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import SchemaGenerator from './SchemaGenerator'
-import { CheckRow, IssuesList } from './PillarsBoard'
+import { CheckRow, IssuesList, pillarHeadline } from './PillarsBoard'
 
 // Schema & Structure's wizard-style pillar detail (Phase 3 of the mockup ->
 // production sync -- see workflow-mockup.html's #pane-schema for the design
@@ -55,14 +55,40 @@ const STEP_LABELS = [
 //     Deliberately doesn't claim "coverage varies by page" the way the
 //     mockup's illustrative version does -- real per-page classification
 //     is still the not-yet-built Page coverage step (2/3 below).
+// Old audit runs (anything scored before 2026-08-16) never persisted
+// businessEntityCount/sitemapPageCount at all -- those keys are simply
+// absent from `raw`, not present-but-null. Collapsing "never checked" and
+// "checked and failed" into one flat "Not checked" reads as a flat
+// contradiction against the top finding sentence (itself derived from the
+// SAME old run) whenever that finding says business-entity schema WAS
+// found -- exactly what showed up live on Firestarter SEO's own client
+// page. So: derive a real Found/Not-found from the pass/fail check that DID
+// run on every version of this checker, before ever falling back to a true
+// "no data at all" state. The exact count still requires a fresh audit run
+// (checks only ever recorded pass/fail, never a count) -- that's said
+// honestly rather than guessed.
 function schemaStatPills(pillar) {
   const raw = pillar?.raw || {}
-  const checksTotal = typeof raw.checksTotal === 'number' ? raw.checksTotal : (pillar?.checks?.length ?? 7)
+  const checks = pillar?.checks || []
+  const checksTotal = typeof raw.checksTotal === 'number' ? raw.checksTotal : (checks.length || 7)
   const checksPassing = typeof raw.checksPassing === 'number'
     ? raw.checksPassing
-    : (pillar?.checks || []).filter(c => c.status === 'pass').length
+    : checks.filter(c => c.status === 'pass').length
   const passRatio = checksTotal > 0 ? checksPassing / checksTotal : 0
-  const businessEntityCount = typeof raw.businessEntityCount === 'number' ? raw.businessEntityCount : null
+
+  const businessEntityCountRaw = typeof raw.businessEntityCount === 'number' ? raw.businessEntityCount : null
+  const businessEntityCheck = checks.find(c => /business entity/i.test(c.label || ''))
+  // null = no data at all (neither the new field nor an old check exists);
+  // true/false = derived from the old run's real pass/fail check.
+  const businessEntityKnownPass = businessEntityCountRaw === null && businessEntityCheck
+    ? businessEntityCheck.status === 'pass'
+    : null
+
+  // Distinguish "this run predates the sitemap check entirely" (key absent
+  // from raw) from "the check ran but the fetch failed" (key present,
+  // value null) -- otherwise an old run gets the misleading claim that
+  // sitemap.xml "wasn't reachable" when it was never even attempted.
+  const sitemapKeyPresent = Object.prototype.hasOwnProperty.call(raw, 'sitemapPageCount')
   const sitemapPageCount = typeof raw.sitemapPageCount === 'number' ? raw.sitemapPageCount : null
 
   return [
@@ -75,17 +101,37 @@ function schemaStatPills(pillar) {
     },
     {
       key: 'notfound',
-      tone: businessEntityCount === null ? null : businessEntityCount > 0 ? 'good' : 'gap',
-      eyebrow: businessEntityCount === null ? '● Not checked' : businessEntityCount > 0 ? '▲ Found' : '● Not found',
-      value: businessEntityCount === null ? '--' : String(businessEntityCount),
-      desc: 'business-entity schema (Organization / LocalBusiness)'
+      tone: businessEntityCountRaw !== null
+        ? (businessEntityCountRaw > 0 ? 'good' : 'gap')
+        : businessEntityKnownPass !== null
+          ? (businessEntityKnownPass ? 'good' : 'gap')
+          : null,
+      eyebrow: businessEntityCountRaw !== null
+        ? (businessEntityCountRaw > 0 ? '▲ Found' : '● Not found')
+        : businessEntityKnownPass !== null
+          ? (businessEntityKnownPass ? '▲ Found' : '● Not found')
+          : '● Not checked',
+      value: businessEntityCountRaw !== null
+        ? String(businessEntityCountRaw)
+        : businessEntityKnownPass !== null
+          ? (businessEntityKnownPass ? 'Yes' : 'No')
+          : '--',
+      desc: businessEntityCountRaw !== null
+        ? 'business-entity schema (Organization / LocalBusiness)'
+        : businessEntityKnownPass !== null
+          ? 'exact count needs a fresh audit run'
+          : 'business-entity schema (Organization / LocalBusiness)'
     },
     {
       key: 'sitewide',
       tone: sitemapPageCount === null ? null : 'caution',
       eyebrow: sitemapPageCount === null ? '● Not checked' : '● Site-wide',
       value: sitemapPageCount === null ? 'Not checked' : `${sitemapPageCount} page${sitemapPageCount === 1 ? '' : 's'}`,
-      desc: sitemapPageCount === null ? 'sitemap.xml not reachable this run' : 'found in sitemap.xml -- per-page checks not yet built'
+      desc: sitemapPageCount !== null
+        ? 'found in sitemap.xml -- per-page checks not yet built'
+        : sitemapKeyPresent
+          ? 'sitemap.xml not reachable this run'
+          : 'not available until the next audit run'
     }
   ]
 }
@@ -152,7 +198,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                   {pillar.grade || '--'}
                 </div>
                 <div>
-                  <div className="grade-title">Schema &amp; Structure</div>
+                  <div className="grade-title">{pillarHeadline('Schema & Structure', pillar)}</div>
                   {pillar.finding && <div className="grade-sub">{pillar.finding}</div>}
                 </div>
               </div>
@@ -172,20 +218,48 @@ export default function SchemaWizard({ pillar, clientId, client }) {
               {selectedPill && (
                 <div className="pill-detail show">
                   {selectedPill === 'failing' && <CheckRow checks={pillar.checks} />}
-                  {selectedPill === 'notfound' && (
-                    <p className="pd-lead" style={{ margin: 0 }}>
-                      {pillar.raw?.businessEntityCount > 0
-                        ? `${pillar.raw.businessEntityCount} business-entity schema block(s) found (${(pillar.raw.schemasFound || []).join(', ') || 'see raw evidence below'}).`
-                        : 'No LocalBusiness/Organization-style schema found -- this is the single biggest lever for showing up correctly in AI answers and local search.'}
-                    </p>
-                  )}
-                  {selectedPill === 'sitewide' && (
-                    <p className="pd-lead" style={{ margin: 0 }}>
-                      {pillar.raw?.sitemapPageCount != null
-                        ? `sitemap.xml lists ${pillar.raw.sitemapPageCount} page(s). Only the homepage is actually checked for schema today -- classifying and checking every page individually is the Page coverage step below, not yet built.`
-                        : "sitemap.xml wasn't reachable on the most recent run, so this couldn't be counted -- not the same as zero pages."}
-                    </p>
-                  )}
+                  {selectedPill === 'notfound' && (() => {
+                    const raw = pillar.raw || {}
+                    const businessEntityCountRaw = typeof raw.businessEntityCount === 'number' ? raw.businessEntityCount : null
+                    const businessEntityCheck = (pillar.checks || []).find(c => /business entity/i.test(c.label || ''))
+                    if (businessEntityCountRaw !== null) {
+                      return (
+                        <p className="pd-lead" style={{ margin: 0 }}>
+                          {businessEntityCountRaw > 0
+                            ? `${businessEntityCountRaw} business-entity schema block(s) found (${(raw.schemasFound || []).join(', ') || 'see raw evidence below'}).`
+                            : 'No LocalBusiness/Organization-style schema found -- this is the single biggest lever for showing up correctly in AI answers and local search.'}
+                        </p>
+                      )
+                    }
+                    if (businessEntityCheck) {
+                      return (
+                        <p className="pd-lead" style={{ margin: 0 }}>
+                          {businessEntityCheck.status === 'pass'
+                            ? "A business-entity schema check passed on this run, but this older run didn't record the exact count/type -- run a fresh audit to see it broken out here."
+                            : 'No LocalBusiness/Organization-style schema found -- this is the single biggest lever for showing up correctly in AI answers and local search.'}
+                        </p>
+                      )
+                    }
+                    return <p className="pd-lead" style={{ margin: 0 }}>Not checked yet -- run an audit to see this.</p>
+                  })()}
+                  {selectedPill === 'sitewide' && (() => {
+                    const raw = pillar.raw || {}
+                    const sitemapKeyPresent = Object.prototype.hasOwnProperty.call(raw, 'sitemapPageCount')
+                    if (typeof raw.sitemapPageCount === 'number') {
+                      return (
+                        <p className="pd-lead" style={{ margin: 0 }}>
+                          {`sitemap.xml lists ${raw.sitemapPageCount} page(s). Only the homepage is actually checked for schema today -- classifying and checking every page individually is the Page coverage step below, not yet built.`}
+                        </p>
+                      )
+                    }
+                    return (
+                      <p className="pd-lead" style={{ margin: 0 }}>
+                        {sitemapKeyPresent
+                          ? "sitemap.xml wasn't reachable on the most recent run, so this couldn't be counted -- not the same as zero pages."
+                          : 'This run predates the sitemap page-count check -- run a fresh audit to see it here.'}
+                      </p>
+                    )
+                  })()}
                 </div>
               )}
               {Array.isArray(pillar.issues) && pillar.issues.length > 0 && !selectedPill && <IssuesList issues={pillar.issues} />}
