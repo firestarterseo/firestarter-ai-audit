@@ -159,6 +159,13 @@ function technicalDiagnosisText(pillar, pills) {
 export default function TechnicalFoundationWizard({ pillar, clientId, defaultDev }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
+  // dueDate -- 2026-08-17: restores the mockup's due-date field for the
+  // Asana-task preview below. Local-only (not persisted -- there's no real
+  // column or task-tracker for it yet, unlike defaultDev which really does
+  // write to clients.default_dev via TechnicalDevAssignee) -- the assign-note
+  // next to it says so plainly, same honesty convention as everywhere else
+  // in this project, rather than silently dropping the field entirely.
+  const [dueDate, setDueDate] = useState('')
   const clusters = clusterIssues(pillar?.issues)
   const realIssueCount = (pillar?.issues || []).filter(i => i.severity && i.severity !== 'info').length
   const pills = pillar ? technicalStatPills(pillar) : []
@@ -273,23 +280,48 @@ export default function TechnicalFoundationWizard({ pillar, clientId, defaultDev
             </div>
           )}
           <TechnicalDevAssignee clientId={clientId} defaultDev={defaultDev} />
-          <p className="text-tiny text-muted" style={{ margin: '10px 0 0' }}>
-            There's no per-fix status tracking yet -- this sets one default developer for this client's Technical Foundation work overall, not a per-issue assignment.
+          <div className="assign-field" style={{ marginTop: 10 }}>
+            <label htmlFor="tech-duedate">Due date</label>
+            <input id="tech-duedate" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+          </div>
+          <p className="assign-note">
+            There's no real Asana (or other task-tracker) integration wired up in this tool yet -- the button below builds a preview of what that task would look like, using this client's real issue data, but it doesn't create anything in a live Asana workspace. There's also no per-fix status tracking; the developer field above is one default per client, not a per-issue assignment.
           </p>
           <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(2)}>&larr; Back</button>
-            <button className="btn btn-primary" onClick={() => setStep(4)}>Verify &rarr;</button>
+            <button className="btn btn-primary" onClick={() => setStep(4)}>Create Asana task &rarr;</button>
           </div>
         </div>
       )}
 
       {step === 4 && (
         <div>
+          {(() => {
+            const perf = clusters.performance.filter(i => i.severity && i.severity !== 'info')
+            const savingsMatches = perf.map(i => /potential savings: ~(\d+)ms/i.exec(i.message || '')).filter(Boolean).map(m => parseInt(m[1], 10))
+            const totalMs = savingsMatches.length > 0 ? savingsMatches.reduce((a, b) => a + b, 0) : null
+            const taskName = realIssueCount > 0
+              ? `Fix ${realIssueCount} Technical Foundation issue${realIssueCount === 1 ? '' : 's'}${totalMs ? ` (~${(totalMs / 1000).toFixed(1)}s savings)` : ''}`
+              : 'Technical Foundation -- no open issues to fix right now'
+            return (
+              <div className="asana-card">
+                <div className="asana-card-top">
+                  <span className="asana-icon">&#8801;</span>
+                  <span className="asana-task-name">{taskName}</span>
+                </div>
+                <div className="asana-card-meta">
+                  <span className="section-badge">Technical SEO</span>
+                  <span className="asana-meta-item">{defaultDev ? `Assigned: ${defaultDev}` : 'Assigned: -- none set --'}</span>
+                  <span className="asana-meta-item">{dueDate ? `Due ${dueDate}` : 'Due --'}</span>
+                </div>
+              </div>
+            )
+          })()}
           {/* .callout, not .concept-banner -- this is true, real information
               (an honest limitation), not illustrative/proposed content, so
               it shouldn't borrow the "not real yet" visual language. */}
           <div className="callout">
-            <b>How this actually gets verified:</b> there's no task tracker wired up here, so nothing "completes" on its own. These checks (HTTPS, robots.txt/sitemap, broken links, Core Web Vitals, Lighthouse SEO/Accessibility/Best Practices) only get re-verified by running another audit for this client -- once a fix ships, re-run the audit and this pillar's grade and issues below will reflect it.
+            <b>This is a preview, not a live Asana task:</b> there's no task tracker wired up here, so nothing above was actually created anywhere -- it's built from this client's real issue data so a strategist can see exactly what a real task would say, but clicking &ldquo;Create Asana task&rdquo; doesn&rsquo;t call Asana. These checks only get re-verified by running another audit for this client -- once a fix ships, re-run the audit and this pillar's grade and issues below will reflect it.
           </div>
           {pillar ? (
             <div className="card" style={{ padding: 18 }}>

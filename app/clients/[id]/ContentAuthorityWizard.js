@@ -167,6 +167,12 @@ export default function ContentAuthorityWizard({ pillar }) {
   const [selectedGap, setSelectedGap] = useState(null)
   const activeGapKey = selectedGap || gaps[0]?.key || null
   const activeGap = gaps.find(g => g.key === activeGapKey) || null
+  // assignee/dueDate -- 2026-08-17: restores the mockup's assign-row for
+  // this gap's action, same local-only pattern (and same honesty note)
+  // TechnicalFoundationWizard.js's due-date field uses -- there's no real
+  // task-tracker column for either of these yet.
+  const [assignee, setAssignee] = useState('Francine Gautier')
+  const [dueDate, setDueDate] = useState('')
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
@@ -287,6 +293,25 @@ export default function ContentAuthorityWizard({ pillar }) {
               <p className="text-small" style={{ margin: '10px 0 0', color: 'var(--text)' }}>
                 <b>Recommendation:</b> {GAP_RECOMMENDATIONS[activeGap.key] || 'Close this gap relative to tracked competitors.'}
               </p>
+              <div className="assign-row" style={{ marginTop: 12 }}>
+                <div className="assign-field">
+                  <label htmlFor="content-assignee">Assign to</label>
+                  <select id="content-assignee" value={assignee} onChange={e => setAssignee(e.target.value)}>
+                    <option value="Francine Gautier">Francine Gautier (project owner)</option>
+                    <option value="Jeff">Jeff</option>
+                    <option value="Kyle Carney">Kyle Carney</option>
+                    <option value="Leo Resplandor">Leo Resplandor</option>
+                    <option value="Skyler Malley">Skyler Malley</option>
+                  </select>
+                </div>
+                <div className="assign-field">
+                  <label htmlFor="content-duedate">Due date</label>
+                  <input id="content-duedate" type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+                </div>
+              </div>
+              <p className="assign-note">
+                There's no real Asana (or other task-tracker) integration wired up in this tool yet -- the assignee list is a small hardcoded roster, not a live team/project lookup. The button below builds a real preview of this task using this gap's actual data, but it doesn't create anything in a live Asana workspace.
+              </p>
             </div>
           ) : (
             <div className="card" style={{ padding: 18 }}>
@@ -302,17 +327,34 @@ export default function ContentAuthorityWizard({ pillar }) {
           {Array.isArray(pillar?.issues) && pillar.issues.length > 0 && <IssuesList issues={pillar.issues} />}
           <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(2)}>&larr; Back</button>
-            <button className="btn btn-primary" onClick={() => setStep(4)}>Verify &rarr;</button>
+            <button className="btn btn-primary" onClick={() => setStep(4)}>Create Asana task &rarr;</button>
           </div>
         </div>
       )}
 
       {step === 4 && (
         <div>
+          {activeGap && (
+            <div className="asana-card">
+              <div className="asana-card-top">
+                <span className="asana-icon">&#8801;</span>
+                <span className="asana-task-name">
+                  {activeGap.key === 'referring_domains' && `Link building push: close the ${activeGap.competitorAvg - activeGap.clientValue}-domain referring-domains gap`}
+                  {activeGap.key === 'freshness' && `Build a content calendar (${activeGap.clientValue} days since last update, competitors average ${activeGap.competitorAvg})`}
+                  {activeGap.key === 'word_count' && `Expand key page content (${activeGap.clientValue} words vs a ${activeGap.competitorAvg}-word competitor average)`}
+                </span>
+              </div>
+              <div className="asana-card-meta">
+                <span className="section-badge">{activeGap.key === 'referring_domains' ? 'Link Building' : 'Content'}</span>
+                <span className="asana-meta-item">Assigned: {assignee}</span>
+                <span className="asana-meta-item">{dueDate ? `Due ${dueDate}` : 'Due --'}</span>
+              </div>
+            </div>
+          )}
           {/* .callout, not .concept-banner -- true, real information about a
               real limitation, not illustrative/proposed content. */}
           <div className="callout">
-            <b>How this actually gets verified:</b> there's no task tracker wired up here, so nothing "completes" on its own. These checks (content depth, freshness, referring domains) and the competitor gap ranking above only get re-verified by running another audit for this client -- once new content or links go live, re-run the audit and this pillar's grade and gaps below will reflect it.
+            <b>This is a preview, not a live Asana task:</b> there's no task tracker wired up here, so nothing above was actually created anywhere -- it's built from this gap's real data so a strategist can see exactly what a real task would say, but clicking &ldquo;Create Asana task&rdquo; doesn&rsquo;t call Asana. These checks (content depth, freshness, referring domains) and the competitor gap ranking above only get re-verified by running another audit for this client -- once new content or links go live, re-run the audit and this pillar's grade and gaps below will reflect it.
           </div>
           {pillar ? (
             <div className="card" style={{ padding: 18 }}>
