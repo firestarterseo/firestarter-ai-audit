@@ -286,21 +286,36 @@ export default function SchemaWizard({ pillar, clientId, client }) {
 
       {step === 2 && (
         <div>
-          {pillar ? (
-            <div className="card" style={{ padding: 18 }}>
-              <div className="grade-title" style={{ marginBottom: 2 }}>Not every page needs the same schema</div>
-              <div className="grade-sub" style={{ marginBottom: 14 }}>
-                Pages are pulled from sitemap.xml (already fetched for the Technical Foundation check), but only the homepage is actually run through the Schema &amp; Structure checker today -- classifying and scoring every other page individually isn&rsquo;t built yet, so only one real row is shown below instead of guessing at the rest.
+          {pillar ? (() => {
+            const realPages = Array.isArray(pillar.raw?.sitemapPages) ? pillar.raw.sitemapPages : null
+            const homeChecksPassing = (pillar.checks || []).filter(c => c.status === 'pass').length
+            const homeChecksTotal = (pillar.checks || []).length || 7
+            const rows = realPages && realPages.length > 0
+              ? realPages
+              : [{ path: '/', type: 'Home' }]
+            return (
+              <div className="card" style={{ padding: 18 }}>
+                <div className="grade-title" style={{ marginBottom: 2 }}>Not every page needs the same schema</div>
+                <div className="grade-sub" style={{ marginBottom: 14 }}>
+                  Pages below are pulled from this client&rsquo;s real sitemap.xml (already fetched for the Technical Foundation check). Only the homepage is actually run through the Schema &amp; Structure checker&rsquo;s 7 checks today -- every other real page is listed by its real URL and page type, honestly marked &ldquo;Not classified yet&rdquo; rather than a guessed pass/fail, since per-page schema scoring beyond the homepage isn&rsquo;t built yet.
+                </div>
+                {rows.map((p, i) => (
+                  <div key={p.path} className={`page-row${i === 0 ? ' selected' : ''}`}>
+                    <span className="type-badge">{p.type}</span>
+                    <span className="path">{p.path}</span>
+                    <span className={`status ${p.type === 'Home' ? (homeChecksPassing >= homeChecksTotal * 0.85 ? 'good' : 'bad') : 'muted'}`}>
+                      {p.type === 'Home' ? `${homeChecksPassing} / ${homeChecksTotal} checks` : 'Not classified yet'}
+                    </span>
+                  </div>
+                ))}
+                {!realPages && (
+                  <p className="text-tiny text-muted" style={{ marginTop: 10 }}>
+                    This run predates the real sitemap page list, or the sitemap fetch failed -- re-run the audit to see this client&rsquo;s actual pages here.
+                  </p>
+                )}
               </div>
-              <div className="page-row selected">
-                <span className="type-badge">Home</span>
-                <span className="path">/</span>
-                <span className={`status ${(pillar.checks || []).filter(c => c.status === 'pass').length >= (pillar.checks || []).length * 0.85 ? 'good' : 'bad'}`}>
-                  {(pillar.checks || []).filter(c => c.status === 'pass').length} / {(pillar.checks || []).length || 7} checks
-                </span>
-              </div>
-            </div>
-          ) : (
+            )
+          })() : (
             <div className="card-empty" style={{ padding: 18 }}>
               <div className="text-small text-muted">Not yet audited -- run an audit to see this pillar's real checks.</div>
             </div>
