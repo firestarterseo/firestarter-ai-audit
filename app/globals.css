@@ -98,9 +98,19 @@ p, span, div, label, input, select, textarea, button {
 }
 
 .app-main {
-  max-width: 1080px;
+  /* Widened 2026-08-16 to match workflow-mockup.html's own .shell exactly
+     (max-width: 1280px; padding: 28px 20px 80px) -- the mockup's container
+     was never actually narrow, the real app's was. Confirmed live via
+     screenshots of the real prototype file at its natural width: 6 tab
+     labels + generous spacing fit comfortably with room to spare. The
+     previous fix (shrinking tab font/margins to survive a cramped 1016px
+     container) treated the container width as fixed and worked around it
+     -- backwards. Widening the shared container is the real fix, and the
+     tab spacing below is reverted to the mockup's original values now
+     that there's finally room for them. */
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 40px 32px 80px;
+  padding: 28px 20px 80px;
 }
 
 .page-header {
@@ -219,19 +229,13 @@ p, span, div, label, input, select, textarea, button {
    bar), and its own CSS grid was a source of an earlier bug (a 5-then-1
    wrap at this app's typical width). Removed rather than left dead.
 
-   2026-08-16 update: the SAME 5-then-1 wrap came right back here, just one
-   level up -- .app-main caps real pages at 1016px of usable width (see
-   that rule below), which is narrower than the mockup's own demo shell.
-   Measured the 6 real pillar labels at the mockup's original spacing
-   (20px margin-right, 12.5px font, 6px icon gap) in a 1016px-wide
-   container: items 1-5 end at 865px, item 6 needs another 179px (159px
-   button + 20px margin) and doesn't fit -- it wraps alone onto its own
-   row, stranded exactly like the old tile grid's 6th tile. Trimmed
-   spacing (margin-right 20->12, font-size 12.5->12, icon gap 6->4) until
-   all 6 fit on one row with real headroom to spare (measured: item 6 now
-   ends at 960px, leaving 56px of the 1016px container unused) rather than
-   shaving it down to a pixel-perfect fit that a slightly different font
-   render could tip back over. */
+   2026-08-16 correction: a first pass at the SAME 5-then-1 wrap (caused by
+   .app-main capping real pages at 1016px, narrower than the mockup's own
+   1240px-wide shell) tried to fix it by shrinking this row's spacing to
+   survive the cramped container. Wrong direction -- the mockup's container
+   was never actually narrow. Reverted back to the mockup's exact original
+   values (20px margin-right, 12.5px font, 6px icon gap) now that .app-main
+   itself is widened to match the mockup's real .shell width instead. */
 
 .toplevel-tabs {
   display: flex;
@@ -245,9 +249,9 @@ p, span, div, label, input, select, textarea, button {
   background: none;
   border: none;
   padding: 10px 4px;
-  margin-right: 12px;
+  margin-right: 20px;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--muted);
   cursor: pointer;
@@ -257,7 +261,7 @@ p, span, div, label, input, select, textarea, button {
   white-space: nowrap;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .toplevel-tabs button .idx {

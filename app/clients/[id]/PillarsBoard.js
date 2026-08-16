@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 
 // Dashboard view for a client's 5 pillars -- replaces what used to be one
 // long scroll of fully-expanded cards. Per direct feedback: as more pillars
@@ -66,6 +66,43 @@ export function pillarHeadline(label, pillar) {
   const topIssue = (pillar?.issues || [])[0]
   if (topIssue?.severity === 'critical') return `${label} — a critical gap, not just polish`
   return `${label} — a partial picture, not a blank one`
+}
+
+// StepChips -- shared .steps row for every wizard (Schema/Technical/Content),
+// factored out 2026-08-16 after two real omissions turned up in all three
+// wizards' own copy-pasted version of this row:
+//   1. workflow-mockup.html puts a <span class="step-arrow">›</span> between
+//      every pair of chips (see e.g. its #schema-steps markup) -- every
+//      wizard here was just rendering bare chips with no separator at all,
+//      a real, visible gap from the prototype, not a stylistic choice.
+//   2. the mockup's goStep(scope, n) marks any chip with index < n as
+//      .done (turns it green -- see .step-chip.done in globals.css) as
+//      you move forward through the flow, so a strategist can see what
+//      they've already been through. Every wizard here only ever toggled
+//      .active, never .done -- steps behind you looked identical to steps
+//      you'd never opened.
+// One shared component now backs all three, so this can't quietly drift
+// out of sync per-wizard again the way it just did.
+export function StepChips({ labels, step, onStep }) {
+  return (
+    <div className="steps">
+      {labels.map((label, i) => {
+        const n = i + 1
+        return (
+          <Fragment key={n}>
+            {i > 0 && <span className="step-arrow">&rsaquo;</span>}
+            <button
+              type="button"
+              className={`step-chip${step === n ? ' active' : step > n ? ' done' : ''}`}
+              onClick={() => onStep(n)}
+            >
+              <span className="num">{n}</span> {label}
+            </button>
+          </Fragment>
+        )
+      })}
+    </div>
+  )
 }
 
 const CHECK_ICON = { pass: '✓', partial: '✗', fail: '✗', not_verified: '–' }

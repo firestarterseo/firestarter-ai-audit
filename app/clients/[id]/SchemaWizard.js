@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import SchemaGenerator from './SchemaGenerator'
-import { CheckRow, IssuesList, pillarHeadline } from './PillarsBoard'
+import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 
 // Schema & Structure's wizard-style pillar detail (Phase 3 of the mockup ->
 // production sync -- see workflow-mockup.html's #pane-schema for the design
@@ -173,21 +173,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-      <div className="steps">
-        {STEP_LABELS.map((label, i) => {
-          const n = i + 1
-          return (
-            <button
-              key={n}
-              type="button"
-              className={`step-chip${step === n ? ' active' : ''}`}
-              onClick={() => setStep(n)}
-            >
-              <span className="num">{n}</span> {label}
-            </button>
-          )
-        })}
-      </div>
+      <StepChips labels={STEP_LABELS} step={step} onStep={setStep} />
 
       {step === 1 && (
         <div>

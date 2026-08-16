@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckRow, IssuesList, pillarHeadline } from './PillarsBoard'
+import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 
 // Content Authority's wizard-style pillar detail -- same port pattern
 // SchemaWizard.js / TechnicalFoundationWizard.js established, applied to
@@ -54,27 +54,66 @@ function gapStatusTag(ratio) {
 
 const GAP_TAG_LABEL = { good: 'At or ahead', watch: 'Close', gap: 'Biggest gap' }
 
+// contentStatPills(pillar) -- 2026-08-16, same fix as
+// TechnicalFoundationWizard.js's technicalStatPills: Diagnosis step 1 was
+// rendering the generic CheckRow/IssuesList "AI slop" list instead of the
+// mockup's own SOLID/WATCH/biggest-gap stat-pill-row. Every number here was
+// already being computed and persisted by content-checker.js on every past
+// run -- parsed from its real evidence strings and `_raw.contentGaps`
+// (already used by the Recommended-gaps step below), not a new capability,
+// so this works immediately on existing runs, not just future ones.
+function contentStatPills(pillar) {
+  const evidence = pillar?.evidence || []
+
+  const wordMatch = evidence.map(e => /average (\d+) words\/page/i.exec(e)).find(Boolean)
+  const avgWords = wordMatch ? parseInt(wordMatch[1], 10) : null
+
+  const freshMatch = evidence.map(e => /\((\d+) days ago\)/i.exec(e)).find(Boolean)
+  const daysSince = freshMatch ? parseInt(freshMatch[1], 10) : null
+
+  const gaps = Array.isArray(pillar?.raw?.contentGaps) ? pillar.raw.contentGaps : []
+  const worstGap = gaps[0] || null
+  const refDomainsMatch = evidence.map(e => /^(\d+) live referring domain/i.exec(e)).find(Boolean)
+  const liveRefDomains = refDomainsMatch ? parseInt(refDomainsMatch[1], 10) : null
+
+  return [
+    {
+      key: 'words',
+      tone: avgWords === null ? null : avgWords >= 300 ? 'good' : avgWords >= 150 ? 'caution' : 'gap',
+      eyebrow: avgWords === null ? '● Not checked' : avgWords >= 300 ? '▲ Solid' : '● Watch',
+      value: avgWords === null ? '--' : `${avgWords}w`,
+      desc: 'homepage word count, sampled this run'
+    },
+    {
+      key: 'freshness',
+      tone: daysSince === null ? null : daysSince <= 90 ? 'good' : daysSince <= 180 ? 'caution' : 'gap',
+      eyebrow: daysSince === null ? '● Not checked' : daysSince <= 90 ? '▲ Fresh' : '● Watch',
+      value: daysSince === null ? '--' : `${daysSince} days`,
+      desc: 'since last dated content update'
+    },
+    {
+      key: 'gap',
+      tone: worstGap
+        ? (worstGap.ratio >= 1 ? 'good' : worstGap.ratio >= 0.9 ? 'caution' : 'gap')
+        : (liveRefDomains === null ? null : liveRefDomains >= 20 ? 'good' : 'gap'),
+      eyebrow: worstGap
+        ? (worstGap.ratio >= 1 ? '▲ Ahead' : '▼ Biggest gap')
+        : (liveRefDomains === null ? '● Not checked' : liveRefDomains >= 20 ? '▲ Solid' : '▼ Gap'),
+      value: worstGap ? `${worstGap.clientValue} vs ${worstGap.competitorAvg}` : (liveRefDomains === null ? '--' : String(liveRefDomains)),
+      desc: worstGap ? `${worstGap.label.toLowerCase()} vs. tracked competitor avg` : 'referring domains (needs 2+ tracked competitors to rank)'
+    }
+  ]
+}
+
 export default function ContentAuthorityWizard({ pillar }) {
   const [step, setStep] = useState(1)
+  const [selectedPill, setSelectedPill] = useState(null)
   const gaps = Array.isArray(pillar?.raw?.contentGaps) ? pillar.raw.contentGaps : []
+  const pills = pillar ? contentStatPills(pillar) : []
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-      <div className="steps">
-        {STEP_LABELS.map((label, i) => {
-          const n = i + 1
-          return (
-            <button
-              key={n}
-              type="button"
-              className={`step-chip${step === n ? ' active' : ''}`}
-              onClick={() => setStep(n)}
-            >
-              <span className="num">{n}</span> {label}
-            </button>
-          )
-        })}
-      </div>
+      <StepChips labels={STEP_LABELS} step={step} onStep={setStep} />
 
       {step === 1 && (
         <div>
@@ -89,8 +128,41 @@ export default function ContentAuthorityWizard({ pillar }) {
                   {pillar.finding && <div className="grade-sub">{pillar.finding}</div>}
                 </div>
               </div>
-              <CheckRow checks={pillar.checks} />
-              {Array.isArray(pillar.issues) && pillar.issues.length > 0 && <IssuesList issues={pillar.issues} />}
+              <div className="stat-pill-row">
+                {pills.map(p => (
+                  <div
+                    key={p.key}
+                    className={`stat-pill clickable${p.tone ? ` ${p.tone}` : ''}${selectedPill === p.key ? ' active' : ''}`}
+                    onClick={() => setSelectedPill(k => k === p.key ? null : p.key)}
+                  >
+                    <div className="eyebrow">{p.eyebrow}</div>
+                    <div className="v">{p.value}</div>
+                    <div className="d">{p.desc}</div>
+                  </div>
+                ))}
+              </div>
+              {selectedPill && (
+                <div className="pill-detail show">
+                  {selectedPill === 'words' && (
+                    <p className="pd-lead" style={{ margin: 0 }}>
+                      {(pillar.evidence || []).find(e => /average \d+ words\/page/i.test(e)) || 'Not checked on the most recent run.'}
+                    </p>
+                  )}
+                  {selectedPill === 'freshness' && (
+                    <p className="pd-lead" style={{ margin: 0 }}>
+                      {(pillar.evidence || []).find(e => /days ago\)/i.test(e)) || 'Not checked on the most recent run.'}
+                    </p>
+                  )}
+                  {selectedPill === 'gap' && (
+                    <p className="pd-lead" style={{ margin: 0 }}>
+                      {gaps.length > 0
+                        ? `Ranked worst-first vs tracked competitors: ${gaps.map(g => `${g.label} (${g.clientValue} ${g.unit} vs ${g.competitorAvg} ${g.unit})`).join('; ')}.`
+                        : (pillar.evidence || []).find(e => /live referring domain/i.test(e)) || 'Needs 2+ active tracked competitors with comparable data to rank a gap.'}
+                    </p>
+                  )}
+                </div>
+              )}
+              {Array.isArray(pillar.issues) && pillar.issues.length > 0 && !selectedPill && <IssuesList issues={pillar.issues} />}
             </div>
           ) : (
             <div className="card-empty" style={{ padding: 18 }}>

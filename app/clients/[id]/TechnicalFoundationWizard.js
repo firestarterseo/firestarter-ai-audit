@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckRow, IssuesList, pillarHeadline } from './PillarsBoard'
+import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 import TechnicalDevAssignee from './TechnicalDevAssignee'
 
 // Technical Foundation's wizard-style pillar detail -- same port pattern
@@ -59,6 +59,70 @@ function clusterIssues(issues) {
   return buckets
 }
 
+// technicalStatPills(pillar) -- 2026-08-16. Diagnosis step 1 was rendering
+// the generic CheckRow (checkmark/X bullet list) + IssuesList (red
+// "CRITICAL" cards) here instead of the mockup's own SOLID/WATCH/OPPORTUNITY
+// stat-pill-row -- the exact same gap Schema & Structure's Diagnosis step
+// had before it got the same treatment. Fixed the same way: real numbers,
+// not the mockup's illustrative "6 broken" / "~2.1s".
+//
+// None of these needed a new checker capability or a fresh audit run --
+// unlike Schema's sitemapPageCount, every number here was ALREADY being
+// computed and persisted by technical-checker.js on every run to date, just
+// folded into plain-English evidence/issue strings instead of a structured
+// _raw field. Parsing those strings (rather than requiring a backend change
+// + a fresh audit before this could ever render for real) means this works
+// immediately, on runs that already exist:
+//   - broken-link count: checkBrokenLinks always pushes an evidence line
+//     "Checked N internal links; M broken." when the check actually ran,
+//     whether or not any were broken -- unlike its issue (only pushed when
+//     M > 0), so evidence is the reliable source for "0 broken" too.
+//   - load-time savings: each Lighthouse "opportunity" audit becomes its
+//     own issue with "(potential savings: ~Xms)" in its message (see
+//     collectPerformanceOpportunities) -- summed across all of them for one
+//     real aggregate number, same "~2.1s" framing the mockup uses, just
+//     computed instead of invented.
+function technicalStatPills(pillar) {
+  const checks = pillar?.checks || []
+  const checksTotal = checks.length || 5
+  const checksPassing = checks.filter(c => c.status === 'pass').length
+  const passRatio = checksTotal > 0 ? checksPassing / checksTotal : 0
+
+  const evidence = pillar?.evidence || []
+  const brokenMatch = evidence.map(e => /Checked \d+ internal links?; (\d+) broken/i.exec(e)).find(Boolean)
+  const brokenCount = brokenMatch ? parseInt(brokenMatch[1], 10) : null
+
+  const savingsMatches = (pillar?.issues || [])
+    .map(i => /potential savings: ~(\d+)ms/i.exec(i.message || ''))
+    .filter(Boolean)
+    .map(m => parseInt(m[1], 10))
+  const totalSavingsMs = savingsMatches.length > 0 ? savingsMatches.reduce((a, b) => a + b, 0) : null
+
+  return [
+    {
+      key: 'solid',
+      tone: passRatio >= 0.85 ? 'good' : passRatio >= 0.5 ? 'caution' : 'bad',
+      eyebrow: passRatio >= 0.85 ? '▲ Solid' : '▼ Gaps',
+      value: `${checksPassing} / ${checksTotal}`,
+      desc: 'foundational checks passing'
+    },
+    {
+      key: 'watch',
+      tone: brokenCount === null ? null : brokenCount === 0 ? 'good' : 'caution',
+      eyebrow: brokenCount === null ? '● Not checked' : brokenCount === 0 ? '▲ None found' : '● Watch',
+      value: brokenCount === null ? '--' : brokenCount === 0 ? '0' : `${brokenCount} broken`,
+      desc: 'internal links (4xx/5xx)'
+    },
+    {
+      key: 'opportunity',
+      tone: totalSavingsMs === null ? null : totalSavingsMs >= 1000 ? 'gap' : 'caution',
+      eyebrow: totalSavingsMs === null ? '● Not checked' : '▼ Opportunity',
+      value: totalSavingsMs === null ? '--' : `~${(totalSavingsMs / 1000).toFixed(1)}s`,
+      desc: 'Lighthouse load-time savings'
+    }
+  ]
+}
+
 // Literal duplicate of PillarsBoard.js's/SchemaWizard.js's own gradeClass --
 // same "small pure helper, not worth a cross-module dependency for"
 // reasoning already established across this project's checker files.
@@ -73,26 +137,14 @@ function gradeClass(grade) {
 
 export default function TechnicalFoundationWizard({ pillar, clientId, defaultDev }) {
   const [step, setStep] = useState(1)
+  const [selectedPill, setSelectedPill] = useState(null)
   const clusters = clusterIssues(pillar?.issues)
   const realIssueCount = (pillar?.issues || []).filter(i => i.severity && i.severity !== 'info').length
+  const pills = pillar ? technicalStatPills(pillar) : []
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-      <div className="steps">
-        {STEP_LABELS.map((label, i) => {
-          const n = i + 1
-          return (
-            <button
-              key={n}
-              type="button"
-              className={`step-chip${step === n ? ' active' : ''}`}
-              onClick={() => setStep(n)}
-            >
-              <span className="num">{n}</span> {label}
-            </button>
-          )
-        })}
-      </div>
+      <StepChips labels={STEP_LABELS} step={step} onStep={setStep} />
 
       {step === 1 && (
         <div>
@@ -107,8 +159,44 @@ export default function TechnicalFoundationWizard({ pillar, clientId, defaultDev
                   {pillar.finding && <div className="grade-sub">{pillar.finding}</div>}
                 </div>
               </div>
-              <CheckRow checks={pillar.checks} />
-              {Array.isArray(pillar.issues) && pillar.issues.length > 0 && <IssuesList issues={pillar.issues} />}
+              <div className="stat-pill-row">
+                {pills.map(p => (
+                  <div
+                    key={p.key}
+                    className={`stat-pill clickable${p.tone ? ` ${p.tone}` : ''}${selectedPill === p.key ? ' active' : ''}`}
+                    onClick={() => setSelectedPill(k => k === p.key ? null : p.key)}
+                  >
+                    <div className="eyebrow">{p.eyebrow}</div>
+                    <div className="v">{p.value}</div>
+                    <div className="d">{p.desc}</div>
+                  </div>
+                ))}
+              </div>
+              {selectedPill && (
+                <div className="pill-detail show">
+                  {selectedPill === 'solid' && <CheckRow checks={pillar.checks} />}
+                  {selectedPill === 'watch' && (
+                    <p className="pd-lead" style={{ margin: 0 }}>
+                      {(() => {
+                        const brokenIssues = (pillar.issues || []).filter(i => /broken internal link/i.test(i.message || ''))
+                        if (brokenIssues.length > 0) return brokenIssues[0].message
+                        const evidenceLine = (pillar.evidence || []).find(e => /Checked \d+ internal links?/i.test(e))
+                        return evidenceLine || 'Not checked on the most recent run.'
+                      })()}
+                    </p>
+                  )}
+                  {selectedPill === 'opportunity' && (
+                    (() => {
+                      const opportunityIssues = (pillar.issues || []).filter(i => /potential savings:/i.test(i.message || ''))
+                      if (opportunityIssues.length === 0) {
+                        return <p className="pd-lead" style={{ margin: 0 }}>No Lighthouse performance opportunities with measurable savings on the most recent run.</p>
+                      }
+                      return <CheckRow checks={opportunityIssues.map(i => ({ label: i.message, status: 'fail' }))} />
+                    })()
+                  )}
+                </div>
+              )}
+              {Array.isArray(pillar.issues) && pillar.issues.length > 0 && !selectedPill && <IssuesList issues={pillar.issues} />}
             </div>
           ) : (
             <div className="card-empty" style={{ padding: 18 }}>
