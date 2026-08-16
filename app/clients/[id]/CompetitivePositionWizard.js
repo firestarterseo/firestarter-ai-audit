@@ -104,10 +104,45 @@ function competitiveDiagnosisText(pillar, pills) {
   return parts.join(', ') + '.'
 }
 
+// Literal port of workflow-mockup.html's own <details class="disclosure">
+// competitor mini-list (top 10 shown, "Show all N" to reveal the rest) --
+// added 2026-08-17 alongside competitive-position-checker.js's new
+// _raw.competitorBreakdown field. Was entirely missing from the live
+// Diagnosis step before this; CompetitorsManager (step 2) only ever
+// supported add/deactivate, it never showed each competitor's own real
+// keyword/citation numbers.
+function CompetitorBreakdownDisclosure({ breakdown }) {
+  const [showAll, setShowAll] = useState(false)
+  if (!Array.isArray(breakdown) || breakdown.length === 0) return null
+  const shown = showAll ? breakdown : breakdown.slice(0, 10)
+  const hiddenCount = breakdown.length - shown.length
+
+  return (
+    <details className="disclosure" open>
+      <summary><span className="car">&#9656;</span> Compared against {breakdown.length} tracked competitor{breakdown.length === 1 ? '' : 's'}{breakdown.length > 10 ? ' -- top 10 shown' : ''}</summary>
+      <div className="mini-list">
+        {shown.map(c => (
+          <div className="row" key={c.domain}>
+            <b>{c.name || c.domain}</b>
+            {' -- '}
+            {c.orgKeywords !== null ? `${c.orgKeywords.toLocaleString()} keywords` : 'keyword count not verified'}, cited {c.citedCount}x
+          </div>
+        ))}
+      </div>
+      {hiddenCount > 0 && (
+        <button type="button" className="show-more-btn" onClick={() => setShowAll(true)}>
+          Show all {breakdown.length} competitors
+        </button>
+      )}
+    </details>
+  )
+}
+
 export default function CompetitivePositionWizard({ pillar, clientId, competitors, opportunities, clientDomain }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
   const pills = pillar && !pillar.noData ? competitiveStatPills(pillar) : []
+  const competitorBreakdown = Array.isArray(pillar?.raw?.competitorBreakdown) ? pillar.raw.competitorBreakdown : null
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
@@ -157,6 +192,17 @@ export default function CompetitivePositionWizard({ pillar, clientId, competitor
                 </div>
               )}
               {Array.isArray(pillar.issues) && pillar.issues.length > 0 && !selectedPill && <IssuesList issues={pillar.issues} />}
+              {competitorBreakdown ? (
+                <CompetitorBreakdownDisclosure breakdown={competitorBreakdown} />
+              ) : (
+                // This run predates competitorBreakdown (added 2026-08-17) --
+                // not the same as zero competitors, so this says so plainly
+                // rather than rendering an empty disclosure. Resolves on the
+                // next audit run for this client.
+                <p className="text-tiny text-muted" style={{ marginTop: 12 }}>
+                  Per-competitor keyword/citation numbers aren&rsquo;t available for this run -- re-run the audit to see them here.
+                </p>
+              )}
             </div>
           ) : (
             <div className="card-empty" style={{ padding: 18 }}>
