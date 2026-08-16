@@ -168,7 +168,7 @@ p, span, div, label, input, select, textarea, button {
 }
 
 .btn:active { transform: translateY(1px); }
-.btn:disabled { cursor: default; opacity: 0.65; transform: none; }
+.btn:disabled { cursor: not-allowed; opacity: 0.45; box-shadow: none; transform: none; }
 
 .btn-primary {
   background: var(--grad);
@@ -198,6 +198,7 @@ p, span, div, label, input, select, textarea, button {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
+  margin-bottom: 14px;
 }
 
 .card-empty {
@@ -303,6 +304,8 @@ p, span, div, label, input, select, textarea, button {
 /* ---------- Grade badge ---------- */
 
 .grade-badge {
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -310,6 +313,7 @@ p, span, div, label, input, select, textarea, button {
   color: var(--white);
   font-family: var(--font-display), 'Fjalla One', sans-serif;
   font-weight: 400;
+  font-size: 17px;
   letter-spacing: 0.5px;
   flex-shrink: 0;
 }

@@ -5,6 +5,7 @@ import PromptTester from './PromptTester'
 import TestPromptsManager from './TestPromptsManager'
 import ClientActions from './ClientActions'
 import SchemaWizard from './SchemaWizard'
+import EntityAuthorityWizard from './EntityAuthorityWizard'
 import CompetitorsManager from './CompetitorsManager'
 import OpportunitiesManager from './OpportunitiesManager'
 import PillarsBoard from './PillarsBoard'
@@ -149,7 +150,11 @@ export default async function ClientDetailPage({ params }) {
         // props. Only `wp_connected` (a boolean) needs to reach the browser.
         <SchemaWizard pillar={pillarsByKey.get(key)} clientId={client.id} client={sanitizeClient(client)} />
       )
-      : key === 'technical_foundation'
+      : key === 'entity_citation_authority'
+        ? (
+          <EntityAuthorityWizard pillar={pillarsByKey.get(key)} />
+        )
+        : key === 'technical_foundation'
         ? (
           <TechnicalFoundationWizard pillar={pillarsByKey.get(key)} clientId={client.id} defaultDev={client.default_dev} />
         )
