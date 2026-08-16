@@ -8,7 +8,7 @@ import SchemaWizard from './SchemaWizard'
 import CompetitorsManager from './CompetitorsManager'
 import OpportunitiesManager from './OpportunitiesManager'
 import PillarsBoard from './PillarsBoard'
-import TechnicalDevAssignee from './TechnicalDevAssignee'
+import TechnicalFoundationWizard from './TechnicalFoundationWizard'
 
 export const dynamic = 'force-dynamic'
 
@@ -130,13 +130,17 @@ export default async function ClientDetailPage({ params }) {
     label: PILLAR_LABELS[key],
     pillar: pillarsByKey.get(key),
     notYetBuilt: NOT_YET_BUILT.has(key),
-    // customDetail (Phase 3) -- Schema & Structure fully replaces the
-    // generic grade-badge/checks/issues card with its own step-by-step
-    // wizard (see SchemaWizard.js) instead of just appending SchemaGenerator
-    // below it via `children` the way the other pillars below do. Built
-    // here rather than inside PillarsBoard.js so that Client Component
-    // still never needs to know what a "pillar" actually looks like -- see
-    // that file's own comment on this.
+    // customDetail (Phase 3, extended here to Technical Foundation) -- fully
+    // replaces the generic grade-badge/checks/issues card with a step-by-step
+    // wizard (see SchemaWizard.js / TechnicalFoundationWizard.js) instead of
+    // just appending extra content below it via `children` the way the
+    // remaining pillars below do. Built here rather than inside
+    // PillarsBoard.js so that Client Component still never needs to know
+    // what a "pillar" actually looks like -- see that file's own comment on
+    // this. TechnicalDevAssignee used to be appended via `children` for
+    // technical_foundation, but children never renders once customDetail is
+    // set (see PillarsBoard.js's expand loop), so it now lives inside
+    // TechnicalFoundationWizard's own "Fix detail" step instead.
     customDetail: key === 'schema_structure'
       ? (
         // sanitizeClient strips the encrypted WordPress credential -- see
@@ -144,12 +148,13 @@ export default async function ClientDetailPage({ params }) {
         // props. Only `wp_connected` (a boolean) needs to reach the browser.
         <SchemaWizard pillar={pillarsByKey.get(key)} clientId={client.id} client={sanitizeClient(client)} />
       )
-      : null,
+      : key === 'technical_foundation'
+        ? (
+          <TechnicalFoundationWizard pillar={pillarsByKey.get(key)} clientId={client.id} defaultDev={client.default_dev} />
+        )
+        : null,
     children: (
       <>
-        {key === 'technical_foundation' && (
-          <TechnicalDevAssignee clientId={client.id} defaultDev={client.default_dev} />
-        )}
         {key === 'ai_geo_visibility' && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)', display: 'grid', gap: 14 }}>
             <TestPromptsManager clientId={client.id} savedPrompts={client.test_prompts} bare />
