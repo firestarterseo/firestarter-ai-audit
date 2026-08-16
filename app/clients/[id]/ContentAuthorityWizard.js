@@ -24,6 +24,11 @@ import { CheckRow, IssuesList } from './PillarsBoard'
 // every other pillar this session -- cut for the same reason (no real
 // task-tracker integration exists); this step instead says plainly that
 // re-running the audit is what actually re-verifies these checks.
+//
+// 2026-08-16: step-nav/cluster-card classes swapped from bespoke wizard-*
+// classes to workflow-mockup.html's real .steps/.step-chip/.cluster-grid/
+// .cluster-card/.tag/.callout -- see globals.css's header comments on that
+// port and TechnicalFoundationWizard.js's identical pass for the reasoning.
 
 const STEP_LABELS = ['Diagnosis', 'Recommended gaps', 'Gap detail', 'Verify']
 
@@ -42,10 +47,12 @@ function gradeClass(grade) {
 // average, < 1 means behind. Kept as a tiny local helper rather than
 // reused from the checker since it's just a display label, not scoring.
 function gapStatusTag(ratio) {
-  if (ratio >= 1) return { label: 'At or ahead', color: 'var(--grade-a)' }
-  if (ratio >= 0.9) return { label: 'Close', color: 'var(--grade-c)' }
-  return { label: 'Biggest gap', color: 'var(--grade-f)' }
+  if (ratio >= 1) return 'good'
+  if (ratio >= 0.9) return 'watch'
+  return 'gap'
 }
+
+const GAP_TAG_LABEL = { good: 'At or ahead', watch: 'Close', gap: 'Biggest gap' }
 
 export default function ContentAuthorityWizard({ pillar }) {
   const [step, setStep] = useState(1)
@@ -53,17 +60,17 @@ export default function ContentAuthorityWizard({ pillar }) {
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-      <div className="wizard-steps">
+      <div className="steps">
         {STEP_LABELS.map((label, i) => {
           const n = i + 1
           return (
             <button
               key={n}
               type="button"
-              className={`wizard-step-chip${step === n ? ' active' : ''}`}
+              className={`step-chip${step === n ? ' active' : ''}`}
               onClick={() => setStep(n)}
             >
-              <span className="wizard-step-num">{n}</span> {label}
+              <span className="num">{n}</span> {label}
             </button>
           )
         })}
@@ -72,26 +79,25 @@ export default function ContentAuthorityWizard({ pillar }) {
       {step === 1 && (
         <div>
           {pillar ? (
-            <div className="card" style={{ padding: 18 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <div className={`grade-badge ${gradeClass(pillar.grade)}`} style={{ width: 34, height: 34, fontSize: 14 }}>
+            <div className="card" style={{ padding: 20 }}>
+              <div className="grade-row">
+                <div className={`grade-badge ${gradeClass(pillar.grade)}`} style={{ width: 34, height: 34, fontSize: 17 }}>
                   {pillar.grade || '--'}
                 </div>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>Content Authority</div>
+                <div>
+                  <div className="grade-title">Content Authority</div>
+                  {pillar.finding && <div className="grade-sub">{pillar.finding}</div>}
+                </div>
               </div>
               <CheckRow checks={pillar.checks} />
-              {Array.isArray(pillar.issues) && pillar.issues.length > 0 ? (
-                <IssuesList issues={pillar.issues} />
-              ) : (
-                pillar.finding && <p style={{ fontSize: 14, margin: '6px 0' }}>{pillar.finding}</p>
-              )}
+              {Array.isArray(pillar.issues) && pillar.issues.length > 0 && <IssuesList issues={pillar.issues} />}
             </div>
           ) : (
             <div className="card-empty" style={{ padding: 18 }}>
               <div className="text-small text-muted">Not yet audited -- run an audit to see this pillar's real checks.</div>
             </div>
           )}
-          <div className="wizard-cta-row">
+          <div className="cta-row">
             <button className="btn btn-primary" onClick={() => setStep(2)}>See recommended gaps &rarr;</button>
           </div>
         </div>
@@ -100,18 +106,19 @@ export default function ContentAuthorityWizard({ pillar }) {
       {step === 2 && (
         <div>
           {gaps.length > 0 ? (
-            <div style={{ display: 'grid', gap: 10 }}>
+            <div className="cluster-grid">
               {gaps.map(g => {
                 const tag = gapStatusTag(g.ratio)
                 return (
-                  <div key={g.key} className="card" style={{ padding: 14 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>{g.label}</div>
-                      <span className="pill pill-lead" style={{ marginLeft: 'auto', color: tag.color }}>{tag.label}</span>
+                  <div key={g.key} className="cluster-card">
+                    <div className="name">{g.label}</div>
+                    <div className="meta">
+                      {g.clientValue} {g.unit} vs. {g.competitorAvg} {g.unit} avg
                     </div>
-                    <p className="text-small text-muted" style={{ margin: '4px 0 0' }}>
-                      {g.clientValue} {g.unit} vs. {g.competitorAvg} {g.unit} average across {g.comparedCount} tracked competitor{g.comparedCount === 1 ? '' : 's'}
-                    </p>
+                    <span className={`tag ${tag}`}>{GAP_TAG_LABEL[tag]}</span>
+                    <div className="kws">
+                      Across {g.comparedCount} tracked competitor{g.comparedCount === 1 ? '' : 's'} with comparable data this run.
+                    </div>
                   </div>
                 )
               })}
@@ -123,7 +130,7 @@ export default function ContentAuthorityWizard({ pillar }) {
               </div>
             </div>
           )}
-          <div className="wizard-cta-row">
+          <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(1)}>&larr; Back</button>
             <button className="btn btn-primary" onClick={() => setStep(3)}>See gap detail &rarr;</button>
           </div>
@@ -142,7 +149,7 @@ export default function ContentAuthorityWizard({ pillar }) {
             )}
           </div>
           {Array.isArray(pillar?.issues) && pillar.issues.length > 0 && <IssuesList issues={pillar.issues} />}
-          <div className="wizard-cta-row">
+          <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(2)}>&larr; Back</button>
             <button className="btn btn-primary" onClick={() => setStep(4)}>Verify &rarr;</button>
           </div>
@@ -151,11 +158,10 @@ export default function ContentAuthorityWizard({ pillar }) {
 
       {step === 4 && (
         <div>
-          <div className="card-empty" style={{ padding: 18, marginBottom: 12 }}>
-            <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 14 }}>How this actually gets verified</div>
-            <p className="text-small text-muted" style={{ margin: 0 }}>
-              There's no task tracker wired up here, so nothing "completes" on its own. These checks (content depth, freshness, referring domains) and the competitor gap ranking above only get re-verified by running another audit for this client -- once new content or links go live, re-run the audit and this pillar's grade and gaps below will reflect it.
-            </p>
+          {/* .callout, not .concept-banner -- true, real information about a
+              real limitation, not illustrative/proposed content. */}
+          <div className="callout">
+            <b>How this actually gets verified:</b> there's no task tracker wired up here, so nothing "completes" on its own. These checks (content depth, freshness, referring domains) and the competitor gap ranking above only get re-verified by running another audit for this client -- once new content or links go live, re-run the audit and this pillar's grade and gaps below will reflect it.
           </div>
           {pillar ? (
             <div className="card" style={{ padding: 18 }}>
@@ -167,7 +173,7 @@ export default function ContentAuthorityWizard({ pillar }) {
               <div className="text-small text-muted">Not yet audited.</div>
             </div>
           )}
-          <div className="wizard-cta-row">
+          <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(3)}>&larr; Back</button>
           </div>
         </div>

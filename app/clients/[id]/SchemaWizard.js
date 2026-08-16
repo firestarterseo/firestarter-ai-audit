@@ -48,14 +48,17 @@ function gradeClass(grade) {
   return 'grade-f'
 }
 
+// Ported from workflow-mockup.html's .concept-banner (2026-08-16) --
+// replaces the plain .card-empty box this originally used. .concept-banner
+// is the prototype's actual visual language for "illustrative/not real
+// yet," a dashed-striped callout, not just a generic empty card.
 function NotBuiltStep({ title, note, onBack, onNext }) {
   return (
     <div>
-      <div className="card-empty" style={{ padding: 18 }}>
-        <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 14 }}>{title}</div>
-        <p className="text-small text-muted" style={{ margin: 0 }}>{note}</p>
+      <div className="concept-banner">
+        <span><b>{title} -- not yet built.</b> {note}</span>
       </div>
-      <div className="wizard-cta-row">
+      <div className="cta-row">
         <button className="btn btn-secondary" onClick={onBack}>&larr; Back</button>
         <button className="btn btn-primary" onClick={onNext}>Continue &rarr;</button>
       </div>
@@ -68,17 +71,17 @@ export default function SchemaWizard({ pillar, clientId, client }) {
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-      <div className="wizard-steps">
+      <div className="steps">
         {STEP_LABELS.map((label, i) => {
           const n = i + 1
           return (
             <button
               key={n}
               type="button"
-              className={`wizard-step-chip${step === n ? ' active' : ''}`}
+              className={`step-chip${step === n ? ' active' : ''}`}
               onClick={() => setStep(n)}
             >
-              <span className="wizard-step-num">{n}</span> {label}
+              <span className="num">{n}</span> {label}
             </button>
           )
         })}
@@ -87,26 +90,25 @@ export default function SchemaWizard({ pillar, clientId, client }) {
       {step === 1 && (
         <div>
           {pillar ? (
-            <div className="card" style={{ padding: 18 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <div className={`grade-badge ${gradeClass(pillar.grade)}`} style={{ width: 34, height: 34, fontSize: 14 }}>
+            <div className="card" style={{ padding: 20 }}>
+              <div className="grade-row">
+                <div className={`grade-badge ${gradeClass(pillar.grade)}`} style={{ width: 34, height: 34, fontSize: 17 }}>
                   {pillar.grade || '--'}
                 </div>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>Schema &amp; Structure</div>
+                <div>
+                  <div className="grade-title">Schema &amp; Structure</div>
+                  {pillar.finding && <div className="grade-sub">{pillar.finding}</div>}
+                </div>
               </div>
               <CheckRow checks={pillar.checks} />
-              {Array.isArray(pillar.issues) && pillar.issues.length > 0 ? (
-                <IssuesList issues={pillar.issues} />
-              ) : (
-                pillar.finding && <p style={{ fontSize: 14, margin: '6px 0' }}>{pillar.finding}</p>
-              )}
+              {Array.isArray(pillar.issues) && pillar.issues.length > 0 && <IssuesList issues={pillar.issues} />}
             </div>
           ) : (
             <div className="card-empty" style={{ padding: 18 }}>
               <div className="text-small text-muted">Not yet audited -- run an audit to see this pillar's real checks.</div>
             </div>
           )}
-          <div className="wizard-cta-row">
+          <div className="cta-row">
             <button className="btn btn-primary" onClick={() => setStep(2)}>See page coverage &rarr;</button>
           </div>
         </div>
@@ -138,7 +140,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
             bare
             visibleSection={step === 4 ? 'form' : step === 5 ? 'publish' : 'verify'}
           />
-          <div className="wizard-cta-row">
+          <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(step - 1)}>&larr; Back</button>
             {step < 6 && (
               <button className="btn btn-primary" onClick={() => setStep(step + 1)}>
