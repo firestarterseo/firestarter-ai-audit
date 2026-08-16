@@ -47,6 +47,18 @@ async function PATCH(request, { params }) {
     }
   })
 
+  // default_dev -- which team member fix work on this client's Technical
+  // Foundation issues defaults to (see TechnicalDevAssignee.js). Plain text,
+  // not a foreign key: there's no real team/user table in this DB yet, and
+  // no real task-creation system (no Asana integration exists in this repo)
+  // consuming this value -- it's just a per-client note a strategist can
+  // set and see, same "plain data field, no downstream automation" scope as
+  // the rest of this PATCH route's optional fields.
+  if ('default_dev' in body) {
+    const value = typeof body.default_dev === 'string' ? body.default_dev.trim() : ''
+    update.default_dev = value || null
+  }
+
   if ('same_as' in body) {
     update.same_as = Array.isArray(body.same_as)
       ? body.same_as.map(u => String(u).trim()).filter(Boolean)

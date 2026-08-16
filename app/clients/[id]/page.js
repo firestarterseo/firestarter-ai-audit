@@ -8,6 +8,7 @@ import SchemaWizard from './SchemaWizard'
 import CompetitorsManager from './CompetitorsManager'
 import OpportunitiesManager from './OpportunitiesManager'
 import PillarsBoard from './PillarsBoard'
+import TechnicalDevAssignee from './TechnicalDevAssignee'
 
 export const dynamic = 'force-dynamic'
 
@@ -146,6 +147,9 @@ export default async function ClientDetailPage({ params }) {
       : null,
     children: (
       <>
+        {key === 'technical_foundation' && (
+          <TechnicalDevAssignee clientId={client.id} defaultDev={client.default_dev} />
+        )}
         {key === 'ai_geo_visibility' && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)', display: 'grid', gap: 14 }}>
             <TestPromptsManager clientId={client.id} savedPrompts={client.test_prompts} bare />
