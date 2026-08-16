@@ -205,11 +205,31 @@ p, span, div, label, input, select, textarea, button {
   margin-bottom: 14px;
 }
 
+/* Fixed 3-column grid, not auto-fill -- there are exactly 6 pillars today
+   (see PILLAR_ORDER in page.js) and auto-fill(minmax(180px,1fr)) was
+   fitting 5 per row at this app's typical container width, leaving the 6th
+   tile (Competitive Position) stranded alone on its own row. A fixed
+   3-column grid always lays out 6 tiles as a clean 2x3, regardless of
+   container width, without needing to track the pillar count here. Direct
+   fix for a real layout bug flagged 2026-08-16, not just a style
+   preference. */
 .pillar-tile-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   margin-bottom: 12px;
+}
+
+@media (max-width: 860px) {
+  .pillar-tile-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .pillar-tile-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .pillar-tile {

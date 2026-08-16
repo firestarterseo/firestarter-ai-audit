@@ -441,17 +441,35 @@ export default function SchemaGenerator({ clientId, client, bare = false, visibl
                 </div>
               </div>
             ) : (
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span className="pill pill-tracked">Connected as {client.wp_username || wpForm.wp_username}</span>
-                <button className="btn btn-primary" disabled={wpPublishing} onClick={publishToWordPress}>
-                  {wpPublishing ? 'Publishing...' : 'Publish to WordPress'}
-                </button>
-                <button className="btn btn-secondary" disabled={wpConnecting} onClick={disconnectWordPress}>
-                  Disconnect
-                </button>
-                {client.wp_last_published_at && (
-                  <span className="text-tiny text-muted">Last published {new Date(client.wp_last_published_at).toLocaleString()}</span>
-                )}
+              // Decluttered 2026-08-16, per direct feedback that this
+              // screen read as "100 different buttons": was a pill + 2
+              // full buttons (Publish, Disconnect) + inline timestamp all
+              // crammed into one row. Connection status/timestamp is now
+              // its own quiet info line; only "Publish to WordPress" (the
+              // one action someone actually comes to this step to take)
+              // stays a full button -- "Disconnect" is a plain text link,
+              // present but visually out of the way, not competing with it.
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+                  <span className="pill pill-tracked">Connected as {client.wp_username || wpForm.wp_username}</span>
+                  {client.wp_last_published_at && (
+                    <span className="text-tiny text-muted">Last published {new Date(client.wp_last_published_at).toLocaleString()}</span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <button className="btn btn-primary" disabled={wpPublishing} onClick={publishToWordPress}>
+                    {wpPublishing ? 'Publishing...' : 'Publish to WordPress'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={wpConnecting}
+                    onClick={disconnectWordPress}
+                    className="text-tiny text-muted"
+                    style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textDecoration: 'underline' }}
+                  >
+                    Disconnect
+                  </button>
+                </div>
               </div>
             )}
 
