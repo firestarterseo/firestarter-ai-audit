@@ -1,16 +1,14 @@
 import { getClientWithRuns, getClientCompetitors, getClientOpportunities, sanitizeClient } from '../../../lib/data'
 import { normalizeDomain } from '../../../lib/nonCompetitorDomains'
 import RunAuditButton from './RunAuditButton'
-import PromptTester from './PromptTester'
-import TestPromptsManager from './TestPromptsManager'
 import ClientActions from './ClientActions'
 import SchemaWizard from './SchemaWizard'
 import EntityAuthorityWizard from './EntityAuthorityWizard'
-import CompetitorsManager from './CompetitorsManager'
-import OpportunitiesManager from './OpportunitiesManager'
 import PillarsBoard from './PillarsBoard'
 import TechnicalFoundationWizard from './TechnicalFoundationWizard'
 import ContentAuthorityWizard from './ContentAuthorityWizard'
+import AiGeoVisibilityWizard from './AiGeoVisibilityWizard'
+import CompetitivePositionWizard from './CompetitivePositionWizard'
 
 export const dynamic = 'force-dynamic'
 
@@ -162,30 +160,27 @@ export default async function ClientDetailPage({ params }) {
           ? (
             <ContentAuthorityWizard pillar={pillarsByKey.get(key)} />
           )
-          : null,
-    children: (
-      <>
-        {key === 'ai_geo_visibility' && (
-          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)', display: 'grid', gap: 14 }}>
-            <TestPromptsManager clientId={client.id} savedPrompts={client.test_prompts} bare />
-            <PromptTester clientId={client.id} bare />
-          </div>
-        )}
-        {key === 'competitive_position' && (
-          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-            {/* clientDomain is only ever used for a read-only display
-                comparison (rendering a "this is you" reference row) --
-                normalized server-side here with the same helper detection
-                uses, since client.domain is stored inconsistently
-                (sometimes with a leading "www.") across real client rows. */}
-            <CompetitorsManager clientId={client.id} competitors={competitors} clientDomain={normalizeDomain(client.domain) || normalizeDomain(client.url)} bare />
-            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-              <OpportunitiesManager clientId={client.id} opportunities={opportunities} bare />
-            </div>
-          </div>
-        )}
-      </>
-    )
+          : key === 'ai_geo_visibility'
+            ? (
+              <AiGeoVisibilityWizard pillar={pillarsByKey.get(key)} clientId={client.id} savedPrompts={client.test_prompts} />
+            )
+            : key === 'competitive_position'
+              ? (
+                // clientDomain is only ever used for a read-only display
+                // comparison (rendering a "this is you" reference row) --
+                // normalized server-side here with the same helper detection
+                // uses, since client.domain is stored inconsistently
+                // (sometimes with a leading "www.") across real client rows.
+                <CompetitivePositionWizard
+                  pillar={pillarsByKey.get(key)}
+                  clientId={client.id}
+                  competitors={competitors}
+                  opportunities={opportunities}
+                  clientDomain={normalizeDomain(client.domain) || normalizeDomain(client.url)}
+                />
+              )
+              : null,
+    children: null
   }))
 
   return (
