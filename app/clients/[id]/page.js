@@ -13,13 +13,20 @@ export const dynamic = 'force-dynamic'
 
 const PILLAR_LABELS = {
   schema_structure: 'Schema & Structure',
+  entity_citation_authority: 'Entity & Citation Authority',
   technical_foundation: 'Technical Foundation',
   ai_geo_visibility: 'AI & GEO Visibility',
   content_authority: 'Content Authority',
   competitive_position: 'Competitive Position'
 }
 
-const PILLAR_ORDER = ['schema_structure', 'technical_foundation', 'ai_geo_visibility', 'content_authority', 'competitive_position']
+// Entity & Citation Authority sits right after Schema & Structure: both are
+// ultimately about making the business a legible, verifiable entity, just
+// from two different angles -- on-site markup (Schema) vs. off-site proof
+// (real backlinks + AI citations from recognized authority domains -- see
+// lib/checkers/entity-citation-authority-checker.js). The other 5 keep
+// their original relative order.
+const PILLAR_ORDER = ['schema_structure', 'entity_citation_authority', 'technical_foundation', 'ai_geo_visibility', 'content_authority', 'competitive_position']
 
 // As of 2026-08-13, Competitive Position is built (see
 // lib/checkers/competitive-position-checker.js) -- it just may not have
