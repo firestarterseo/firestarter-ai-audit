@@ -22,18 +22,64 @@ import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 // session uses (checks-passing ratio + the pillar's own 2 specific real
 // signals) instead of the mockup's specific fake numbers.
 //
-// The mockup's "2 action groups" step showed one half ("author-credential")
-// as closeable via a one-click publish, the other ("platform-presence") as
-// needing new data collection. Neither half is true here: this pillar has
-// no publish/task action of its own (no GBP-claiming API, no directory
-// automation) -- both real signals it measures are informational, closed
-// only by a strategist doing outside work and then a fresh audit run
-// re-checking it. So this wizard's "Recommended actions" step is a plain
-// issues list (same shape as Content Authority's own gap-detail step), and
-// "Verify" says plainly that re-running the audit is what confirms a fix,
-// same convention as every other wizard here.
+// 2026-08-17: rebuilt to match the mockup's real 4-step flow (Diagnosis /
+// Recommended actions / Action detail / Close the loop) instead of the
+// 3-step collapse this wizard shipped with earlier -- a direct instruction
+// after the mockup's step count and its "pick a group, see its detail"
+// interaction were both silently dropped here the same way Content
+// Authority's gap-detail interaction was. The mockup's specific 2 groups
+// ("Author Credentials" / "Platform Presence") describe Person-schema and
+// GBP/directory checks this checker doesn't run -- copying those verbatim
+// would still be fabrication. But the checker DOES have its own real,
+// already-distinct 2-signal split (backlink authority / AI-citation
+// authority, each with its own check + issue above), which maps onto the
+// exact same "pick a group -> see its detail" shape the mockup uses, just
+// with the two groups that are actually real instead of the two that
+// aren't. Neither closes via a one-click publish/claim action (no
+// GBP-claiming API, no directory automation exists) -- both are informational,
+// closed only by a strategist doing outside work and a fresh audit re-checking
+// it, same honest "Close the loop" framing the mockup itself uses for its own
+// non-automatable half (platform-presence).
 
-const STEP_LABELS = ['Diagnosis', 'Recommended actions', 'Verify']
+const STEP_LABELS = ['Diagnosis', 'Recommended actions', 'Action detail', 'Close the loop']
+
+// entityActionGroups(pillar) -- the checker's own 2 real signals, recast as
+// the mockup's 2 selectable action-group cards. Each group's `issue` is
+// this checker's own real issues[] entry for that signal (undefined when
+// that signal is already clean, i.e. no gap to act on).
+function entityActionGroups(pillar) {
+  const checks = pillar?.checks || []
+  const issues = pillar?.issues || []
+  const raw = pillar?.raw || {}
+
+  const backlinkCheck = checks.find(c => /backlink/i.test(c.label || ''))
+  const backlinkIssue = issues.find(i => /backlink/i.test(i.message || ''))
+  const authorityDomains = Array.isArray(raw.authorityReferringDomains) ? raw.authorityReferringDomains : []
+
+  const citationCheck = checks.find(c => /cited by ai engines/i.test(c.label || ''))
+  const citationIssue = issues.find(i => /authority domain/i.test(i.message || '') && /AI/i.test(i.message || ''))
+
+  return [
+    {
+      key: 'backlinks',
+      name: 'Authority Backlinks',
+      meta: 'Real backlinks from recognized authority domains (Ahrefs)',
+      check: backlinkCheck,
+      issue: backlinkIssue,
+      cleanNote: authorityDomains.length > 0 ? `${authorityDomains.length} recognized authority domain(s) already link here.` : null
+    },
+    {
+      key: 'aicitation',
+      name: 'AI Citation Consistency',
+      meta: 'Share of tracked AI mentions that cite a recognized authority domain',
+      check: citationCheck,
+      issue: citationIssue,
+      cleanNote: typeof raw.aiAuthorityCitationShare === 'number' && raw.aiAuthorityCitationShare >= 1
+        ? 'AI engines already cite a recognized authority domain in every tracked mention.'
+        : null
+    }
+  ]
+}
 
 function gradeClass(grade) {
   if (!grade) return 'grade-none'
@@ -113,6 +159,14 @@ export default function EntityAuthorityWizard({ pillar }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
   const pills = pillar ? entityStatPills(pillar) : []
+  const groups = pillar && !pillar.noData ? entityActionGroups(pillar) : []
+  // selectedGroup -- mirrors selectCluster()'s "pick a group -> step 3 shows
+  // that group's detail" interaction. Defaults to whichever group still has
+  // a real open issue (mockup defaults to its first card as "selected");
+  // falls back to the first group if both are already clean.
+  const [selectedGroup, setSelectedGroup] = useState(null)
+  const activeGroupKey = selectedGroup || groups.find(g => g.issue)?.key || groups[0]?.key || null
+  const activeGroup = groups.find(g => g.key === activeGroupKey) || null
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
@@ -181,24 +235,66 @@ export default function EntityAuthorityWizard({ pillar }) {
 
       {step === 2 && (
         <div>
-          <div className="card" style={{ padding: 18 }}>
-            <div style={{ fontWeight: 600, marginBottom: 6, fontSize: 14 }}>What to do next</div>
-            <p className="text-small" style={{ margin: 0 }}>{pillar?.finding || 'Not yet audited.'}</p>
-            {pillar?.recommendation && (
-              <p className="text-small" style={{ margin: '10px 0 0', color: 'var(--text)' }}>
-                <b>Recommendation:</b> {pillar.recommendation}
-              </p>
-            )}
-          </div>
-          {Array.isArray(pillar?.issues) && pillar.issues.length > 0 && <IssuesList issues={pillar.issues} />}
+          {groups.length > 0 ? (
+            <div className="cluster-grid">
+              {groups.map(g => (
+                <div
+                  key={g.key}
+                  className={`cluster-card${activeGroupKey === g.key ? ' selected' : ''}`}
+                  onClick={() => setSelectedGroup(g.key)}
+                >
+                  <div className="name">{g.name}</div>
+                  <div className="meta">{g.meta}</div>
+                  <span className={`tag ${g.issue ? (g.issue.severity === 'critical' || g.issue.severity === 'moderate' ? 'gap' : 'watch') : 'good'}`}>
+                    {g.issue ? (g.issue.severity === 'critical' || g.issue.severity === 'moderate' ? 'Needs attention' : 'Room to improve') : 'Clean'}
+                  </span>
+                  <div className="kws">{g.issue ? g.issue.message : (g.cleanNote || 'No open gap this run.')}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="card-empty" style={{ padding: 18 }}>
+              <div className="text-small text-muted">Not yet audited.</div>
+            </div>
+          )}
           <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(1)}>&larr; Back</button>
-            <button className="btn btn-primary" onClick={() => setStep(3)}>Verify &rarr;</button>
+            <button className="btn btn-primary" onClick={() => setStep(3)}>See action detail &rarr;</button>
           </div>
         </div>
       )}
 
       {step === 3 && (
+        <div>
+          {activeGroup ? (
+            <div className="card" style={{ padding: 18 }}>
+              <div className="brief-title">{activeGroup.name}</div>
+              <div className="brief-meta">{activeGroup.meta}</div>
+              {activeGroup.issue ? (
+                <>
+                  <p className="text-small" style={{ margin: '10px 0 0' }}>{activeGroup.issue.message}</p>
+                  <p className="text-tiny text-muted" style={{ margin: '8px 0 0' }}>{activeGroup.issue.why}</p>
+                  <p className="text-small" style={{ margin: '10px 0 0', color: 'var(--text)' }}>
+                    <b>Recommendation:</b> {activeGroup.issue.recommendation}
+                  </p>
+                </>
+              ) : (
+                <p className="text-small" style={{ margin: '10px 0 0' }}>{activeGroup.cleanNote || 'No open gap this run.'}</p>
+              )}
+            </div>
+          ) : (
+            <div className="card-empty" style={{ padding: 18 }}>
+              <div className="text-small text-muted">Not yet audited.</div>
+            </div>
+          )}
+          <div className="cta-row">
+            <button className="btn btn-secondary" onClick={() => setStep(2)}>&larr; Pick a different action</button>
+            <button className="btn btn-primary" onClick={() => setStep(4)}>Close the loop &rarr;</button>
+          </div>
+        </div>
+      )}
+
+      {step === 4 && (
         <div>
           {/* .callout, not .concept-banner -- true, real information about a
               real limitation, not illustrative/proposed content. */}
@@ -216,7 +312,7 @@ export default function EntityAuthorityWizard({ pillar }) {
             </div>
           )}
           <div className="cta-row">
-            <button className="btn btn-secondary" onClick={() => setStep(2)}>&larr; Back</button>
+            <button className="btn btn-secondary" onClick={() => setStep(3)}>&larr; Back</button>
           </div>
         </div>
       )}
