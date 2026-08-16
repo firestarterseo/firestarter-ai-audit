@@ -105,6 +105,24 @@ function contentStatPills(pillar) {
   ]
 }
 
+// contentDiagnosisText(pillar, pills) -- 2026-08-16: workflow-mockup.html's
+// #pane-content Diagnosis step has a real .diagnosis-text paragraph between
+// .grade-row and .stat-pill-row (line 831) that this wizard was missing --
+// same omission found and fixed in TechnicalFoundationWizard.js. Built from
+// the exact same already-computed contentStatPills() values (words/
+// freshness/gap), not new data or the mockup's own illustrative numbers.
+function contentDiagnosisText(pillar, pills) {
+  const words = pills.find(p => p.key === 'words')
+  const freshness = pills.find(p => p.key === 'freshness')
+  const gap = pills.find(p => p.key === 'gap')
+  const parts = []
+  if (words && words.value !== '--') parts.push(`homepage content runs ${words.value} this run`)
+  if (freshness && freshness.value !== '--') parts.push(`the most recent dated content update was ${freshness.value} ago`)
+  if (gap && gap.value !== '--') parts.push(`the biggest competitive gap is ${gap.desc} (${gap.value})`)
+  if (parts.length === 0) return null
+  return parts.join(', ') + '.'
+}
+
 export default function ContentAuthorityWizard({ pillar }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
@@ -128,6 +146,9 @@ export default function ContentAuthorityWizard({ pillar }) {
                   {pillar.finding && <div className="grade-sub">{pillar.finding}</div>}
                 </div>
               </div>
+              {contentDiagnosisText(pillar, pills) && (
+                <p className="diagnosis-text">{contentDiagnosisText(pillar, pills)}</p>
+              )}
               <div className="stat-pill-row">
                 {pills.map(p => (
                   <div

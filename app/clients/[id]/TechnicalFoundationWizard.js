@@ -135,6 +135,27 @@ function gradeClass(grade) {
   return 'grade-f'
 }
 
+// technicalDiagnosisText(pillar) -- 2026-08-16. Every pillar pane in the
+// mockup except Schema's has a <p class="diagnosis-text"> paragraph between
+// the grade-row and the stat-pill-row (confirmed by re-reading the mockup's
+// literal HTML directly, pillar by pillar, after shipping all five without
+// it) -- a real, structural element this wizard (and Content/Entity/AI-GEO/
+// Competitive) was missing entirely, not a styling nuance. Composed from
+// the SAME real numbers technicalStatPills() already computes, in the same
+// two-sentence "what's clean, what's the real number" shape the mockup
+// uses -- never the mockup's own illustrative "~2.1s / 6 broken" text.
+function technicalDiagnosisText(pillar, pills) {
+  const solid = pills.find(p => p.key === 'solid')
+  const watch = pills.find(p => p.key === 'watch')
+  const opportunity = pills.find(p => p.key === 'opportunity')
+  const parts = []
+  if (solid) parts.push(`Foundational checks are ${solid.value} passing`)
+  if (opportunity && opportunity.value !== '--') parts.push(`Lighthouse found ${opportunity.value} of load-time savings on this run`)
+  if (watch && watch.value !== '--' && watch.value !== '0') parts.push(`a link crawl sample found ${watch.value}`)
+  if (parts.length === 0) return null
+  return parts.join(', ') + '.'
+}
+
 export default function TechnicalFoundationWizard({ pillar, clientId, defaultDev }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
@@ -159,6 +180,9 @@ export default function TechnicalFoundationWizard({ pillar, clientId, defaultDev
                   {pillar.finding && <div className="grade-sub">{pillar.finding}</div>}
                 </div>
               </div>
+              {technicalDiagnosisText(pillar, pills) && (
+                <p className="diagnosis-text">{technicalDiagnosisText(pillar, pills)}</p>
+              )}
               <div className="stat-pill-row">
                 {pills.map(p => (
                   <div

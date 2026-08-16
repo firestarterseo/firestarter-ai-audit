@@ -88,6 +88,27 @@ function entityStatPills(pillar) {
   ]
 }
 
+// entityDiagnosisText(pillar, pills) -- 2026-08-16: workflow-mockup.html's
+// #pane-entity Diagnosis step has a .diagnosis-text paragraph (line 448),
+// but its actual copy is explicitly marked "<i>Illustrative only</i>" and
+// describes GBP-claim/Person-schema signals this checker doesn't measure
+// (see the file header comment above). Copying that text verbatim would
+// fabricate capability that doesn't exist, so this composes a REAL sentence
+// from entityStatPills()'s own already-computed checks/backlinks/aicitation
+// values instead -- same "ground every diagnosis-text in real data" rule
+// every other wizard's version of this helper follows.
+function entityDiagnosisText(pillar, pills) {
+  const checks = pills.find(p => p.key === 'checks')
+  const backlinks = pills.find(p => p.key === 'backlinks')
+  const aicitation = pills.find(p => p.key === 'aicitation')
+  const parts = []
+  if (checks && checks.value !== '--') parts.push(`${checks.value} real authority signals are checked and passing`)
+  if (backlinks && backlinks.value !== '--') parts.push(`${backlinks.value} recognized authority domain(s) link here`)
+  if (aicitation && aicitation.value !== '--') parts.push(`tracked AI mentions cite one ${aicitation.value} of the time`)
+  if (parts.length === 0) return null
+  return parts.join(', ') + '.'
+}
+
 export default function EntityAuthorityWizard({ pillar }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
@@ -110,6 +131,9 @@ export default function EntityAuthorityWizard({ pillar }) {
                   {pillar.finding && <div className="grade-sub">{pillar.finding}</div>}
                 </div>
               </div>
+              {entityDiagnosisText(pillar, pills) && (
+                <p className="diagnosis-text">{entityDiagnosisText(pillar, pills)}</p>
+              )}
               <div className="stat-pill-row">
                 {pills.map(p => (
                   <div

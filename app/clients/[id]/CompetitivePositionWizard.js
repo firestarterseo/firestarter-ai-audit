@@ -86,6 +86,24 @@ function competitiveStatPills(pillar) {
   ]
 }
 
+// competitiveDiagnosisText(pillar, pills) -- 2026-08-16: workflow-mockup.html's
+// #pane-comp Diagnosis step has a real .diagnosis-text paragraph (line 920)
+// between .grade-row and .stat-pill-row that this wizard was missing --
+// same omission found and fixed across every other wizard this session.
+// Built from the exact same already-computed competitiveStatPills() values
+// (headtohead/missed/keywords), not new data or the mockup's own numbers.
+function competitiveDiagnosisText(pillar, pills) {
+  const headtohead = pills.find(p => p.key === 'headtohead')
+  const missed = pills.find(p => p.key === 'missed')
+  const keywords = pills.find(p => p.key === 'keywords')
+  const parts = []
+  if (headtohead && headtohead.value !== '--') parts.push(`the AI-citation head-to-head record is ${headtohead.value}`)
+  if (missed && missed.value !== '--' && !/^0 /.test(missed.value)) parts.push(`${missed.value} where a competitor was cited and this client wasn't`)
+  if (keywords && keywords.value !== '--') parts.push(`organic keyword count is ${keywords.value} vs the tracked-competitor average`)
+  if (parts.length === 0) return null
+  return parts.join(', ') + '.'
+}
+
 export default function CompetitivePositionWizard({ pillar, clientId, competitors, opportunities, clientDomain }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
@@ -108,6 +126,9 @@ export default function CompetitivePositionWizard({ pillar, clientId, competitor
                   {pillar.finding && <div className="grade-sub">{pillar.finding}</div>}
                 </div>
               </div>
+              {competitiveDiagnosisText(pillar, pills) && (
+                <p className="diagnosis-text">{competitiveDiagnosisText(pillar, pills)}</p>
+              )}
               <div className="stat-pill-row">
                 {pills.map(p => (
                   <div

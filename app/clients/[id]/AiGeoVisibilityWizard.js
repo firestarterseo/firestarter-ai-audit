@@ -91,6 +91,24 @@ function aiGeoStatPills(pillar) {
   ]
 }
 
+// aiGeoDiagnosisText(pillar, pills) -- 2026-08-16: workflow-mockup.html's
+// #pane-aigeo Diagnosis step has a real .diagnosis-text paragraph (line
+// 692) between .grade-row and .stat-pill-row that this wizard was missing
+// -- same omission found and fixed across every other wizard this session.
+// Built from the exact same already-computed aiGeoStatPills() values
+// (strong/watch/opportunity), not new data or the mockup's own numbers.
+function aiGeoDiagnosisText(pillar, pills) {
+  const strong = pills.find(p => p.key === 'strong')
+  const watch = pills.find(p => p.key === 'watch')
+  const opportunity = pills.find(p => p.key === 'opportunity')
+  const parts = []
+  if (strong && strong.value !== '--') parts.push(`mentioned in ${strong.value} tracked runs across all engines`)
+  if (watch && watch.value !== '--') parts.push(`the weakest engine is ${watch.value}`)
+  if (opportunity && opportunity.value !== '--' && opportunity.value !== '0 uncited') parts.push(`${opportunity.value} despite being mentioned`)
+  if (parts.length === 0) return null
+  return parts.join(', ') + '.'
+}
+
 export default function AiGeoVisibilityWizard({ pillar, clientId, savedPrompts }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
@@ -113,6 +131,9 @@ export default function AiGeoVisibilityWizard({ pillar, clientId, savedPrompts }
                   {pillar.finding && <div className="grade-sub">{pillar.finding}</div>}
                 </div>
               </div>
+              {aiGeoDiagnosisText(pillar, pills) && (
+                <p className="diagnosis-text">{aiGeoDiagnosisText(pillar, pills)}</p>
+              )}
               <div className="stat-pill-row">
                 {pills.map(p => (
                   <div

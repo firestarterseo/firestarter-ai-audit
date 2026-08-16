@@ -53,11 +53,28 @@ function gradeClass(grade) {
 //   - more than one failing (or none passing) -> a generic-but-honest
 //     partial/critical-gap phrase, since naming just one of several real
 //     gaps would be cherry-picking
+// BUG FIXED 2026-08-16 (found live, in production, via a real screenshot):
+// this originally filtered for `c.status === 'fail'` to count failing
+// checks. That literal string is real for checker.js (Schema) and
+// entity-citation-authority-checker.js (Entity), but
+// technical-checker.js and content-checker.js share a DIFFERENT
+// checkStatus() helper that only ever returns 'pass' | 'partial' |
+// 'not_verified' -- it never returns the literal string 'fail'. So for
+// Technical Foundation and Content Authority specifically, `failing` was
+// always computed as an empty array no matter how many checks actually
+// failed, and this function always returned "clean and complete" --
+// which is exactly what shipped live sitting directly above a checklist
+// visibly showing 2 failing checks (Core Web Vitals, Lighthouse), a
+// flat, visible self-contradiction. Fixed by treating anything that
+// ISN'T 'pass' (after excluding 'not_verified', a data gap rather than a
+// failure) as failing, instead of matching one specific status string
+// that not every checker in this project actually uses.
 export function pillarHeadline(label, pillar) {
-  const checks = pillar?.checks || []
+  const allChecks = pillar?.checks || []
+  const checks = allChecks.filter(c => c.status !== 'not_verified')
   if (!checks.length) return label
   const passing = checks.filter(c => c.status === 'pass')
-  const failing = checks.filter(c => c.status === 'fail')
+  const failing = checks.filter(c => c.status !== 'pass')
   if (failing.length === 0) return `${label} — clean and complete`
   if (failing.length === checks.length) return `${label} — no ground covered yet`
   if (failing.length === 1 && passing.length > 0) {
