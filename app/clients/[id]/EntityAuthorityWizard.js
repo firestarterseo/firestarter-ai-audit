@@ -40,6 +40,29 @@ import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 // closed only by a strategist doing outside work and a fresh audit re-checking
 // it, same honest "Close the loop" framing the mockup itself uses for its own
 // non-automatable half (platform-presence).
+//
+// 2026-08-17 (later same day): the mockup's own pane-entity opens with a
+// .concept-banner literally saying this whole pillar is "a written proposal
+// in ROADMAP.md, not a real check" and calling out ITS two proposed signals
+// by name: "author/Person-schema credentials, multi-platform
+// entity-verification". Backlinks/AI-citation (this checker's real signals)
+// aren't what the mockup's own banner is talking about -- so dropping the
+// Person-schema ("Author Credentials") workflow step entirely, just because
+// it isn't measured by the real checker, was still under-replicating the
+// mockup: the mockup's own step 3 for this concept ("Author Credentials --
+// reusing Schema & Structure") is a real, specific, buildable idea (it names
+// the exact real component -- SchemaGenerator's JSON-LD + WordPress publish
+// flow -- it would reuse with a Person type instead of ProfessionalService).
+// So `entityActionGroups()` now returns a 3rd card for it, marked
+// `proposed: true` and rendered with the mockup's own `.concept-banner`
+// dashed-border visual language (not the solid "Needs attention"/"Clean"
+// tags the 2 real cards get) so it reads as "the mockup's own proposal",
+// never as a real, already-scored signal. Its step-3 detail keeps the
+// mockup's illustrative example page list, explicitly labeled as an example,
+// plus the one factually-true sentence about which real component this would
+// reuse if built. No fake "Person schema generated" success state -- step 4
+// says outright that this specific card is unbuilt, not "closed by a fresh
+// audit" like the two real cards.
 
 const STEP_LABELS = ['Diagnosis', 'Recommended actions', 'Action detail', 'Close the loop']
 
@@ -77,6 +100,20 @@ function entityActionGroups(pillar) {
       cleanNote: typeof raw.aiAuthorityCitationShare === 'number' && raw.aiAuthorityCitationShare >= 1
         ? 'AI engines already cite a recognized authority domain in every tracked mention.'
         : null
+    },
+    // Proposed, not built -- see the 2026-08-17 header comment. Kept out of
+    // any pass/fail math (no `check`, no real `issue`); the wizard renders
+    // this card and its detail with the mockup's own dashed concept-banner
+    // language instead of the "Needs attention"/"Clean" tags the 2 real
+    // cards above get.
+    {
+      key: 'authorcreds',
+      name: 'Author Credentials',
+      meta: 'Person schema + visible bylines (proposed -- not built)',
+      proposed: true,
+      check: null,
+      issue: null,
+      cleanNote: null
     }
   ]
 }
@@ -240,15 +277,20 @@ export default function EntityAuthorityWizard({ pillar }) {
               {groups.map(g => (
                 <div
                   key={g.key}
-                  className={`cluster-card${activeGroupKey === g.key ? ' selected' : ''}`}
+                  className={`cluster-card${activeGroupKey === g.key ? ' selected' : ''}${g.proposed ? ' proposed' : ''}`}
+                  style={g.proposed ? { border: '1.5px dashed var(--border-strong)', background: 'repeating-linear-gradient(135deg, rgba(29,21,37,0.02), rgba(29,21,37,0.02) 10px, rgba(29,21,37,0.04) 10px, rgba(29,21,37,0.04) 20px)' } : undefined}
                   onClick={() => setSelectedGroup(g.key)}
                 >
                   <div className="name">{g.name}</div>
                   <div className="meta">{g.meta}</div>
-                  <span className={`tag ${g.issue ? (g.issue.severity === 'critical' || g.issue.severity === 'moderate' ? 'gap' : 'watch') : 'good'}`}>
-                    {g.issue ? (g.issue.severity === 'critical' || g.issue.severity === 'moderate' ? 'Needs attention' : 'Room to improve') : 'Clean'}
-                  </span>
-                  <div className="kws">{g.issue ? g.issue.message : (g.cleanNote || 'No open gap this run.')}</div>
+                  {g.proposed ? (
+                    <span className="tag watch">Proposed -- not built</span>
+                  ) : (
+                    <span className={`tag ${g.issue ? (g.issue.severity === 'critical' || g.issue.severity === 'moderate' ? 'gap' : 'watch') : 'good'}`}>
+                      {g.issue ? (g.issue.severity === 'critical' || g.issue.severity === 'moderate' ? 'Needs attention' : 'Room to improve') : 'Clean'}
+                    </span>
+                  )}
+                  <div className="kws">{g.proposed ? 'No page-by-page byline check exists yet -- see this card\'s detail for the real component it would reuse.' : (g.issue ? g.issue.message : (g.cleanNote || 'No open gap this run.'))}</div>
                 </div>
               ))}
             </div>
@@ -266,7 +308,25 @@ export default function EntityAuthorityWizard({ pillar }) {
 
       {step === 3 && (
         <div>
-          {activeGroup ? (
+          {activeGroup && activeGroup.proposed ? (
+            <div className="card" style={{ padding: 18 }}>
+              <div className="brief-title">Author Credentials -- reusing Schema &amp; Structure</div>
+              <div className="brief-meta">Proposed -- not built. Nothing below is real audit data.</div>
+              <div className="concept-banner" style={{ marginTop: 10, marginBottom: 10 }}>
+                <span>
+                  This checker doesn&rsquo;t crawl pages for author bylines or Person schema, so there&rsquo;s no real per-page list to show. The example below is illustrative only, copied from the mockup&rsquo;s own proposal, to show the shape a real version of this step would take:
+                </span>
+              </div>
+              <ul className="text-small" style={{ margin: '0 0 10px', paddingLeft: 18, color: 'var(--muted)' }}>
+                <li>Example: /blog/local-seo-guide -- no author byline or Person schema</li>
+                <li>Example: /blog/ai-search-trends -- no author byline or Person schema</li>
+                <li>Example: /about/team -- has bylines, missing Person schema markup</li>
+              </ul>
+              <p className="text-small" style={{ margin: '10px 0 0', color: 'var(--text)' }}>
+                <b>Note:</b> if this were built, generating this schema would reuse the exact same real JSON-LD generator &amp; WordPress publish flow already built and working for Schema &amp; Structure (the <code>SchemaGenerator</code> component -- see that pillar&rsquo;s Generate &amp; review step), just with a Person type instead of ProfessionalService. That reuse is a genuine, real technical fact about this codebase, not a promise of a shipped feature.
+              </p>
+            </div>
+          ) : activeGroup ? (
             <div className="card" style={{ padding: 18 }}>
               <div className="brief-title">{activeGroup.name}</div>
               <div className="brief-meta">{activeGroup.meta}</div>
@@ -296,12 +356,18 @@ export default function EntityAuthorityWizard({ pillar }) {
 
       {step === 4 && (
         <div>
-          {/* .callout, not .concept-banner -- true, real information about a
-              real limitation, not illustrative/proposed content. */}
-          <div className="callout">
-            <b>How this actually gets verified:</b> there's no task tracker or auto-claim action wired up here -- closing a real backlink or AI-citation gap is work a strategist does outside this tool (building a review-platform profile, earning press, etc.). Once that happens, re-run the audit for this client and this pillar's grade and checks below will reflect it.
-          </div>
-          {pillar && !pillar.noData ? (
+          {activeGroup && activeGroup.proposed ? (
+            <div className="callout">
+              <b>This card isn&rsquo;t built:</b> unlike Authority Backlinks and AI Citation Consistency, Author Credentials has no real check behind it at all yet, so there&rsquo;s nothing here that a fresh audit re-verifies. It stays as a proposal until a page-by-page byline/Person-schema check is actually built.
+            </div>
+          ) : (
+            /* .callout, not .concept-banner -- true, real information about a
+               real limitation, not illustrative/proposed content. */
+            <div className="callout">
+              <b>How this actually gets verified:</b> there's no task tracker or auto-claim action wired up here -- closing a real backlink or AI-citation gap is work a strategist does outside this tool (building a review-platform profile, earning press, etc.). Once that happens, re-run the audit for this client and this pillar's grade and checks below will reflect it.
+            </div>
+          )}
+          {activeGroup && activeGroup.proposed ? null : pillar && !pillar.noData ? (
             <div className="card" style={{ padding: 18 }}>
               <div className="text-tiny text-muted" style={{ fontWeight: 600, letterSpacing: 0.5, marginBottom: 8 }}>LAST VERIFIED (most recent audit)</div>
               <CheckRow checks={pillar.checks} />
