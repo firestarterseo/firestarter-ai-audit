@@ -12,14 +12,55 @@ import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 // pillar_scores row and the actual SchemaGenerator component (the same one
 // Phase 1's live-verification card lives in) -- nothing here is invented.
 //
-// Steps 2 and 3 ("Page coverage" / "What's missing, page by page") stay in
-// the step flow as honest not-yet-built placeholders, per direct
-// instruction -- the mockup's version of those steps showed fabricated
-// per-page results, and the real schema checker (lib/checkers/checker.js)
-// only ever scores the homepage today. There is no real per-page
-// classification to show yet; NotBuiltStep says so plainly instead of
-// inventing one.
-//
+// 2026-08-17 correction: step 2 ("Page coverage") and step 3 ("What's
+// missing") were BOTH rendered as a single blanket "not built" placeholder
+// before this. That was only half right. lib/checkers/checker.js's
+// checkSchemaAndStructure() takes one URL and only ever scores the
+// homepage -- so per-OTHER-page classification (step 2's multi-row list in
+// the mockup) genuinely isn't real yet, and stays an honest placeholder.
+// But step 3's "What's missing" content, for the one real page this
+// checker DOES score, is entirely real: the mockup's own "7 checks, but
+// really just 2 kinds of fix" framing maps label-for-label onto this
+// checker's actual 7 checks (Structured data / Business entity schema /
+// sameAs / Address+telephone / BreadcrumbList / WebSite+SearchAction / No
+// missing required properties) -- 5 of them are resolved by generating +
+// publishing schema (the same generator steps 4-6 already use), the other
+// 2 (BreadcrumbList, WebSite+SearchAction) are SEO-plugin/theme settings
+// this tool doesn't write. That grouping was sitting in already-persisted
+// data the whole time; treating it as "not built" was brushing over real
+// work the mockup got right, not an honest gap.
+
+// SCHEMA_CHECK_GROUPS -- which real check(group) it belongs to, and the
+// regex to find its matching real issue (for severity/why/recommendation)
+// in pillar.issues, since checks[] and issues[] aren't index-aligned in
+// checker.js (WebSite+SearchAction's fail case never pushes an issue at
+// all -- it's real, but zero-severity by the checker's own design).
+const SCHEMA_CHECK_GROUPS = {
+  'Structured data (JSON-LD) present': { group: 'generator', issueMatch: /no structured data \(json-ld\)/i },
+  'Business entity schema (LocalBusiness/Organization)': { group: 'generator', issueMatch: /no localbusiness\/organization-style schema/i },
+  'sameAs entity-disambiguation links': { group: 'generator', issueMatch: /no sameas links/i },
+  'Address + telephone on business entity': { group: 'generator', issueMatch: /missing address and\/or telephone/i },
+  'No missing required schema properties': { group: 'generator', issueMatch: /required schema propert(y|ies) missing/i },
+  'BreadcrumbList schema': { group: 'plugin', issueMatch: /no breadcrumblist schema/i },
+  'WebSite + SearchAction': { group: 'plugin', issueMatch: null }
+}
+
+function schemaCheckGroups(pillar) {
+  const checks = pillar?.checks || []
+  const issues = pillar?.issues || []
+  const generator = []
+  const plugin = []
+  checks.forEach(c => {
+    const meta = SCHEMA_CHECK_GROUPS[c.label]
+    if (!meta) return
+    const issue = meta.issueMatch ? issues.find(i => meta.issueMatch.test(i.message || '')) : null
+    const entry = { label: c.label, status: c.status, issue }
+    if (meta.group === 'plugin') plugin.push(entry)
+    else generator.push(entry)
+  })
+  return { generator, plugin }
+}
+
 // SchemaGenerator is rendered ONCE -- the same mounted instance covers
 // steps 4, 5, and 6 (via its `visibleSection` prop), not a fresh instance
 // per step. Re-mounting it per step would re-run its on-mount schema fetch
@@ -148,24 +189,6 @@ function gradeClass(grade) {
   return 'grade-f'
 }
 
-// Ported from workflow-mockup.html's .concept-banner (2026-08-16) --
-// replaces the plain .card-empty box this originally used. .concept-banner
-// is the prototype's actual visual language for "illustrative/not real
-// yet," a dashed-striped callout, not just a generic empty card.
-function NotBuiltStep({ title, note, onBack, onNext }) {
-  return (
-    <div>
-      <div className="concept-banner">
-        <span><b>{title} -- not yet built.</b> {note}</span>
-      </div>
-      <div className="cta-row">
-        <button className="btn btn-secondary" onClick={onBack}>&larr; Back</button>
-        <button className="btn btn-primary" onClick={onNext}>Continue &rarr;</button>
-      </div>
-    </div>
-  )
-}
-
 export default function SchemaWizard({ pillar, clientId, client }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
@@ -262,21 +285,86 @@ export default function SchemaWizard({ pillar, clientId, client }) {
       )}
 
       {step === 2 && (
-        <NotBuiltStep
-          title="Page coverage"
-          note="Not yet built -- the real Schema & Structure checker only scores the homepage today. Classifying every page from the sitemap and checking each one individually (as this step illustrates) is a proposed capability, not a real one yet."
-          onBack={() => setStep(1)}
-          onNext={() => setStep(3)}
-        />
+        <div>
+          {pillar ? (
+            <div className="card" style={{ padding: 18 }}>
+              <div className="grade-title" style={{ marginBottom: 2 }}>Not every page needs the same schema</div>
+              <div className="grade-sub" style={{ marginBottom: 14 }}>
+                Pages are pulled from sitemap.xml (already fetched for the Technical Foundation check), but only the homepage is actually run through the Schema &amp; Structure checker today -- classifying and scoring every other page individually isn&rsquo;t built yet, so only one real row is shown below instead of guessing at the rest.
+              </div>
+              <div className="page-row selected">
+                <span className="type-badge">Home</span>
+                <span className="path">/</span>
+                <span className={`status ${(pillar.checks || []).filter(c => c.status === 'pass').length >= (pillar.checks || []).length * 0.85 ? 'good' : 'bad'}`}>
+                  {(pillar.checks || []).filter(c => c.status === 'pass').length} / {(pillar.checks || []).length || 7} checks
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="card-empty" style={{ padding: 18 }}>
+              <div className="text-small text-muted">Not yet audited -- run an audit to see this pillar's real checks.</div>
+            </div>
+          )}
+          <div className="cta-row">
+            <button className="btn btn-secondary" onClick={() => setStep(1)}>&larr; Back</button>
+            <button className="btn btn-primary" onClick={() => setStep(3)}>See gaps for selected page &rarr;</button>
+          </div>
+        </div>
       )}
 
       {step === 3 && (
-        <NotBuiltStep
-          title="What's missing, page by page"
-          note="Not yet built -- depends on real per-page checking existing first (see the Page coverage step). Once that's real, this step would show each page's specific gaps instead of just the homepage's."
-          onBack={() => setStep(2)}
-          onNext={() => setStep(4)}
-        />
+        <div>
+          {pillar ? (() => {
+            const { generator, plugin } = schemaCheckGroups(pillar)
+            const CheckGroupRow = ({ c }) => (
+              <div key={c.label} className="issue-item">
+                <span className={`issue-badge ${c.status === 'pass' ? 'issue-passing' : (c.issue?.severity ? `issue-${c.issue.severity}` : 'issue-minor')}`}>
+                  {c.status === 'pass' ? 'Passing' : (c.issue?.severity ? c.issue.severity : 'Not detected')}
+                </span>
+                <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{c.label}</div>
+                <p className="text-small issue-why">
+                  {c.status === 'pass'
+                    ? (c.issue?.recommendation || 'Already present -- nothing to do here.')
+                    : (c.issue?.why || c.issue?.message || 'Not detected on the homepage this run.')}
+                </p>
+              </div>
+            )
+            return (
+              <div className="card" style={{ padding: 18 }}>
+                <div className="grade-title" style={{ marginBottom: 2 }}>/ (Home) -- {(pillar.checks || []).length || 7} checks, but really just 2 kinds of fix</div>
+                <div className="grade-sub" style={{ marginBottom: 14 }}>
+                  &ldquo;All kinds of schema missing&rdquo; sounds like a long custom job -- in practice these 7 real checks collapse to one generated block, plus a couple of settings this tool doesn&rsquo;t control.
+                </div>
+                {generator.length > 0 && (
+                  <>
+                    <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Fix with the Schema Generator -- 1 form, 1 publish</div>
+                    <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>These checks all live on the same business-entity block. One generated + published schema resolves all of them at once -- this is the tool already built in the next step.</p>
+                    <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
+                      {generator.map(c => <CheckGroupRow key={c.label} c={c} />)}
+                    </div>
+                  </>
+                )}
+                {plugin.length > 0 && (
+                  <>
+                    <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Already automatic in your SEO plugin -- nothing to build</div>
+                    <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>These aren&rsquo;t schema this tool writes -- they&rsquo;re a plugin setting. If they&rsquo;re off, that&rsquo;s a toggle for the client&rsquo;s webmaster, not a task for this generator.</p>
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      {plugin.map(c => <CheckGroupRow key={c.label} c={c} />)}
+                    </div>
+                  </>
+                )}
+              </div>
+            )
+          })() : (
+            <div className="card-empty" style={{ padding: 18 }}>
+              <div className="text-small text-muted">Not yet audited.</div>
+            </div>
+          )}
+          <div className="cta-row">
+            <button className="btn btn-secondary" onClick={() => setStep(2)}>&larr; Pick a different page</button>
+            <button className="btn btn-primary" onClick={() => setStep(4)}>Fix with the generator &rarr;</button>
+          </div>
+        </div>
       )}
 
       {(step === 4 || step === 5 || step === 6) && (

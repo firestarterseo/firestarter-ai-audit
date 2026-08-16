@@ -422,11 +422,18 @@ p, span, div, label, input, select, textarea, button {
 .issue-moderate { background: var(--grade-d); }
 .issue-minor { background: var(--grade-c); }
 .issue-info { background: var(--grade-none); }
-
+/* Added 2026-08-17 for SchemaWizard.js's real "What's missing" check-row
+   list -- unlike IssuesList (which only ever renders FAILING checks), this
+   list shows every one of the checker's 7 real checks side by side,
+   including passing ones, matching workflow-mockup.html's own "What's
+   missing" step (which shows a green "passing" row for WebSite+SearchAction
+   alongside the failing ones). */
+.issue-passing { background: var(--grade-a); }
 .issue-item:has(.issue-critical) { border-left-color: var(--grade-f); }
 .issue-item:has(.issue-moderate) { border-left-color: var(--grade-d); }
 .issue-item:has(.issue-minor) { border-left-color: var(--grade-c); }
 .issue-item:has(.issue-info) { border-left-color: var(--grade-none); }
+.issue-item:has(.issue-passing) { border-left-color: var(--grade-a); }
 
 .issue-why {
   margin: 4px 0 0;
