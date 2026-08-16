@@ -162,7 +162,7 @@ export function IssuesList({ issues }) {
 // AI & GEO Visibility-specific transparency view -- shows exactly what each
 // engine said for each prompt so a strategist can manually re-run the same
 // prompt and compare, not just trust a grade.
-function AiVisibilityVerify({ raw, snapshot }) {
+export function AiVisibilityVerify({ raw, snapshot }) {
   if (!raw) return null
   const rows = snapshot
     ? (Array.isArray(raw.engineResults) ? raw.engineResults : [])
