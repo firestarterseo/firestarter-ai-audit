@@ -48,7 +48,8 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
   const [wpConnecting, setWpConnecting] = useState(false)
   const [wpPublishing, setWpPublishing] = useState(false)
   const [wpChecking, setWpChecking] = useState(false)
-  const [wpMessage, setWpMessage] = useState(null) // { ok: boolean, text: string }
+  const [wpMessage, setWpMessage] = useState(null) // { ok: boolean, text: string } -- connect/disconnect/publish-request errors only; a real check's own result renders as wpStatus below instead of a duplicate one-line echo of it
+  const [wpStatus, setWpStatus] = useState(null) // last real GET /wp-json/firestarter-schema/v1/status response: { connected, hasSchema, jsonLd, updatedAt } | { connected: false, error }
 
   async function connectWordPress() {
     setWpConnecting(true)
@@ -86,6 +87,7 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
       setWpConnected(false)
       setWpForm({ wp_username: '', wp_app_password: '' })
       setWpMessage(null)
+      setWpStatus(null) // a status check from the old connection is no longer meaningful once disconnected
       router.refresh()
     } catch (err) {
       setWpMessage({ ok: false, text: err.message })
@@ -101,8 +103,14 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
       const res = await fetch(`/api/clients/${clientId}/schema/publish`, { method: 'POST' })
       const data = await res.json()
       if (!data.ok) throw new Error(data.error || 'Publish failed')
-      setWpMessage({ ok: true, text: `Published${data.updatedAt ? ` at ${new Date(data.updatedAt).toLocaleString()}` : ''}.` })
       router.refresh()
+      // Don't just trust this POST response -- immediately re-check the
+      // plugin's own public /status route so what the strategist sees next
+      // is a real, independent confirmation that the publish actually
+      // landed in the site's <head>, not merely that this request didn't
+      // error. Same "verify, don't just trust the write succeeded" instinct
+      // wpPublish.js already documents for why /status exists at all.
+      await checkWordPressStatus()
     } catch (err) {
       setWpMessage({ ok: false, text: err.message })
     } finally {
@@ -110,21 +118,21 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
     }
   }
 
+  // Real live verification -- hits the plugin's public, no-auth /status
+  // route (see lib/wpPublish.js) and stores the raw result in wpStatus,
+  // rendered as its own persistent card below rather than folded into the
+  // ephemeral wpMessage toast. Unlike Technical Foundation / Content
+  // Authority, which only know their real state as of the last scheduled
+  // audit, Schema can confirm exactly what's live on the site right now, at
+  // any time -- this is what makes that true in the UI, not just in theory.
   async function checkWordPressStatus() {
     setWpChecking(true)
-    setWpMessage(null)
     try {
       const res = await fetch(`/api/clients/${clientId}/schema/status`)
       const data = await res.json()
-      if (!data.connected) throw new Error(data.error || 'Could not reach the site')
-      setWpMessage({
-        ok: true,
-        text: data.hasSchema
-          ? `Live on the site${data.updatedAt ? ` -- last updated ${new Date(data.updatedAt).toLocaleString()}` : ''}.`
-          : 'The plugin is reachable, but no schema has been published yet.'
-      })
+      setWpStatus(data)
     } catch (err) {
-      setWpMessage({ ok: false, text: err.message })
+      setWpStatus({ connected: false, error: err.message })
     } finally {
       setWpChecking(false)
     }
@@ -431,6 +439,34 @@ export default function SchemaGenerator({ clientId, client, bare = false }) {
               <p className={wpMessage.ok ? 'text-small' : 'field-error'} style={{ marginTop: 10, color: wpMessage.ok ? 'var(--grade-a)' : undefined }}>
                 {wpMessage.text}
               </p>
+            )}
+
+            {wpStatus && (
+              <div className="issue-item" style={{ marginTop: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                  <span
+                    className="issue-badge"
+                    style={{ background: !wpStatus.connected ? 'var(--grade-f)' : wpStatus.hasSchema ? 'var(--grade-a)' : 'var(--grade-d)' }}
+                  >
+                    {!wpStatus.connected ? 'Live check failed' : wpStatus.hasSchema ? 'Confirmed live' : 'Reachable -- not live yet'}
+                  </span>
+                  <span className="text-tiny text-muted">GET /wp-json/firestarter-schema/v1/status</span>
+                </div>
+                {wpStatus.connected ? (
+                  <p className="text-small" style={{ margin: 0 }}>
+                    {wpStatus.hasSchema
+                      ? "This exact schema is live in the site's <head> right now"
+                      : 'The plugin is reachable, but no schema has been published yet'}
+                    {wpStatus.updatedAt && ` -- last updated ${new Date(wpStatus.updatedAt).toLocaleString()}`}
+                  </p>
+                ) : (
+                  <p className="text-small" style={{ margin: 0, color: 'var(--red)' }}>{wpStatus.error || 'Could not reach the site.'}</p>
+                )}
+                <p className="text-tiny text-muted" style={{ margin: '6px 0 0' }}>
+                  Unlike pillars that only know their real state as of the last scheduled audit, this checks the live site directly -- no
+                  need to wait for the next run to confirm a fix actually took.
+                </p>
+              </div>
             )}
           </div>
         </div>
