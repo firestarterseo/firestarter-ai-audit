@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckRow, IssuesList, pillarHeadline, StepChips, AiVisibilityVerify } from './PillarsBoard'
+import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 import TestPromptsManager from './TestPromptsManager'
 import PromptTester from './PromptTester'
 
@@ -109,6 +109,68 @@ function aiGeoDiagnosisText(pillar, pills) {
   return parts.join(', ') + '.'
 }
 
+// EngineBreakdownRows(pillar) -- 2026-08-17: workflow-mockup.html's step 3
+// ("Core Services — engine by engine", line 744) shows each engine's row
+// (mentioned/not, snippet quoted, who's cited) directly, no extra click --
+// this used to be buried one layer deeper, inside AiVisibilityVerify's own
+// <details>/<summary> accordion (built for the old bunched-together card,
+// before this pillar had its own step-based layout). Since "Engine
+// breakdown" is now already its own dedicated step, that inner accordion
+// was redundant chrome the mockup itself doesn't have -- this renders the
+// exact same real per-engine/per-prompt rows (pillar.raw.latestBreakdown for
+// tracked clients, pillar.raw.engineResults for a one-off snapshot) directly
+// with the mockup's own .engine-row/.et/.name/.badge/.snip/.who markup
+// (already in globals.css, unused until now) instead. No cluster grouping --
+// same reasoning as the file header comment: there's no real intent/cluster
+// field on prompts, so this lists every row from the most recent run rather
+// than inventing the mockup's specific "Core Services" grouping.
+function EngineBreakdownRows({ pillar }) {
+  const raw = pillar?.raw || {}
+  const rows = pillar?.snapshot
+    ? (Array.isArray(raw.engineResults) ? raw.engineResults : [])
+    : (Array.isArray(raw.latestBreakdown) ? raw.latestBreakdown : [])
+  if (rows.length === 0) {
+    return <p className="text-small text-muted" style={{ margin: 0 }}>No per-engine breakdown available for this run yet.</p>
+  }
+  return (
+    <div>
+      {rows.map((r, i) => {
+        const own = Array.isArray(r.ownDomainSourceUrls) ? r.ownDomainSourceUrls : []
+        const otherSources = (Array.isArray(r.sourceUrls) ? r.sourceUrls : []).filter(u => !own.includes(u))
+        return (
+          <div key={i} className="engine-row">
+            <div className="et">
+              <span className="name">{r.engine}{r.weight >= 2 ? ' (high priority)' : ''}</span>
+              {r.ok === false ? (
+                <span className="badge no">Call failed</span>
+              ) : (
+                <span className={`badge ${r.mentioned ? 'yes' : 'no'}`}>{r.mentioned ? 'Mentioned' : 'Not mentioned'}</span>
+              )}
+            </div>
+            {r.prompt && <p className="text-tiny text-muted" style={{ margin: '0 0 4px' }}>&ldquo;{r.prompt}&rdquo;</p>}
+            {r.ok === false ? (
+              <p className="who">Call failed: {r.error || 'unknown error'}</p>
+            ) : (
+              <>
+                {r.responseSnippet && (
+                  <p className="snip">&ldquo;{r.responseSnippet}{r.responseSnippet.length >= 400 ? '…' : ''}&rdquo;</p>
+                )}
+                {r.mentioned ? (
+                  own.length > 0
+                    ? <p className="who">✓ Cited: {own.join(', ')}</p>
+                    : <p className="who">Not cited from your own domain — no link back{r.sentiment ? ` · sentiment: ${r.sentiment}` : ''}</p>
+                ) : (
+                  <p className="who">{otherSources.length > 0 ? `Not your domain — cited instead: ${otherSources.join(', ')}` : 'No citation captured this run.'}</p>
+                )}
+              </>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function AiGeoVisibilityWizard({ pillar, clientId, savedPrompts }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
@@ -185,9 +247,10 @@ export default function AiGeoVisibilityWizard({ pillar, clientId, savedPrompts }
       {step === 2 && (
         <div>
           <div className="card" style={{ padding: 18 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>Engine by engine, real evidence</div>
+            <div style={{ fontWeight: 600, marginBottom: 2, fontSize: 14 }}>Engine by engine, real evidence</div>
+            <div className="text-tiny text-muted" style={{ marginBottom: 10 }}>Same real per-engine evidence already collected today, surfaced directly instead of behind an extra expand click.</div>
             {pillar && !pillar.noData ? (
-              <AiVisibilityVerify raw={pillar.raw} snapshot={pillar.snapshot} />
+              <EngineBreakdownRows pillar={pillar} />
             ) : (
               <div className="text-small text-muted">Not yet audited.</div>
             )}
