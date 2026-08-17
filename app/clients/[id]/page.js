@@ -1,4 +1,5 @@
 import { getClientWithRuns, getClientCompetitors, getClientOpportunities, sanitizeClient } from '../../../lib/data'
+import { getClientIndustryProfile } from '../../../lib/clientIndustryIntelligence'
 import { normalizeDomain } from '../../../lib/nonCompetitorDomains'
 import RunAuditButton from './RunAuditButton'
 import ClientActions from './ClientActions'
@@ -9,6 +10,7 @@ import TechnicalFoundationWizard from './TechnicalFoundationWizard'
 import ContentAuthorityWizard from './ContentAuthorityWizard'
 import AiGeoVisibilityWizard from './AiGeoVisibilityWizard'
 import CompetitivePositionWizard from './CompetitivePositionWizard'
+import ClientIntelligenceCard from './ClientIntelligenceCard'
 
 export const dynamic = 'force-dynamic'
 
@@ -118,6 +120,11 @@ export default async function ClientDetailPage({ params }) {
   const { client, runs } = await getClientWithRuns(id)
   const competitors = await getClientCompetitors(id)
   const opportunities = await getClientOpportunities(id)
+  // Client/Industry Intelligence (Phase 1b) -- read-only here; all
+  // classification/confirmation actions live in ClientIntelligenceCard,
+  // a Client Component, so this Server Component just fetches the
+  // current profile once via the canonical accessor and hands it down.
+  const industryProfile = await getClientIndustryProfile(id)
   const latestRun = runs[0] || null
   const pillarsByKey = new Map((latestRun?.pillars || []).map(p => [p.pillar, p]))
 
@@ -191,7 +198,7 @@ export default async function ClientDetailPage({ params }) {
           <h1 style={{ marginBottom: 4 }}>{client.name}</h1>
           <div className="text-small text-muted">{client.url}</div>
           <div className="text-small text-muted">
-            {[client.city, client.region].filter(Boolean).join(', ')} {client.category ? `· ${client.category}` : ''}
+            {industryProfile.summary || `${[client.city, client.region].filter(Boolean).join(', ')} ${client.category ? `· ${client.category}` : ''}`}
           </div>
         </div>
         <span className={`pill ${client.status === 'tracked' ? 'pill-tracked' : 'pill-lead'}`}>
@@ -222,6 +229,8 @@ export default async function ClientDetailPage({ params }) {
           No audits run yet -- set up AI-visibility test terms below, then click &ldquo;Run audit now&rdquo; to grade this client for the first time.
         </p>
       )}
+
+      <ClientIntelligenceCard clientId={client.id} initialProfile={industryProfile} />
 
       <PillarsBoard pillars={pillars} />
 

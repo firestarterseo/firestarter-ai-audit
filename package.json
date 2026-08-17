@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "test:checkers": "for f in lib/checkers/scripts/*.js; do echo \"=== $f ===\"; node \"$f\" || exit 1; done",
-    "test:client-profile": "node lib/clientProfileFields.test.js"
+    "test:client-profile": "node lib/clientProfileFields.test.js",
+    "test:client-intelligence": "node lib/clientIndustryIntelligence.test.js"
   },
   "dependencies": {
     "@fontsource/fjalla-one": "^5.3.0",
