@@ -2,7 +2,6 @@ import Link from 'next/link'
 import { getClientWithRuns, getClientCompetitors, getClientOpportunities, sanitizeClient } from '../../../lib/data'
 import { normalizeDomain } from '../../../lib/nonCompetitorDomains'
 import { getClientIndustryProfile } from '../../../lib/clientIndustryIntelligence'
-import { getTopicClustersForClient } from '../../../lib/topicClusters'
 import RunAuditButton from './RunAuditButton'
 import ClientActions from './ClientActions'
 import SchemaWizard from './SchemaWizard'
@@ -122,19 +121,26 @@ export default async function ClientDetailPage({ params }) {
   const competitors = await getClientCompetitors(id)
   const opportunities = await getClientOpportunities(id)
   // Read-only summary only -- the full editable Detected Business Context
-  // experience lives at /clients/[id]/business-profile (Client Settings ->
-  // Business Profile), not inside this pillar/audit page. See that page's
-  // header comment for the UX rationale (2026-08-17 placement correction).
+  // experience lives at /clients/[id]/settings/business-profile (Client
+  // Settings -> Business Profile), not inside this pillar/audit page. See
+  // that page's header comment for the UX rationale (2026-08-17 placement
+  // correction).
+  //
+  // The header below deliberately shows only verticalSubindustry/specialty/
+  // businessModel here -- NOT geography or industry, which are already
+  // shown one line up via client.city/region/category. Client identity
+  // should establish identity + a little shared context, not restate the
+  // same facts twice or turn into a status dashboard (2026-08-17 header
+  // decluttering correction -- see the Topic & Prompt Intelligence status,
+  // which used to sit here too, now living only at Client Settings ->
+  // Topic & Prompt Intelligence and the Client Settings link, not beside
+  // business identity).
   const businessProfile = await getClientIndustryProfile(id)
-  // Same read-only-summary treatment as Business Profile above -- the full
-  // AM review experience (approve/edit/reject, discovery trigger) lives at
-  // /clients/[id]/settings/topic-intelligence, not here. See that page's
-  // header comment.
-  const topicClusters = await getTopicClustersForClient(id)
-  const topicClusterCounts = {
-    benchmark: topicClusters.filter(c => c.status === 'benchmark').length,
-    candidate: topicClusters.filter(c => c.status === 'candidate').length
-  }
+  const contextChips = [
+    businessProfile.verticalSubindustry?.value,
+    businessProfile.specialty?.value,
+    businessProfile.businessModel?.value
+  ].filter(Boolean)
   const latestRun = runs[0] || null
   const pillarsByKey = new Map((latestRun?.pillars || []).map(p => [p.pillar, p]))
 
@@ -210,16 +216,17 @@ export default async function ClientDetailPage({ params }) {
           <div className="text-small text-muted">
             {[client.city, client.region].filter(Boolean).join(', ')} {client.category ? `· ${client.category}` : ''}
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
-            <Link href={`/clients/${client.id}/settings/business-profile`} className="pill" style={{ textTransform: 'none' }}>
-              {businessProfile.summary || 'Business profile not detected yet'} &rsaquo;
+          {contextChips.length > 0 ? (
+            <Link href={`/clients/${client.id}/settings/business-profile`} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, textDecoration: 'none' }}>
+              {contextChips.map(chip => (
+                <span key={chip} className="pill" style={{ textTransform: 'none' }}>{chip}</span>
+              ))}
             </Link>
-            <Link href={`/clients/${client.id}/settings/topic-intelligence`} className="pill" style={{ textTransform: 'none' }}>
-              {topicClusters.length === 0
-                ? 'No tracked topics yet'
-                : `${topicClusterCounts.benchmark} topic${topicClusterCounts.benchmark === 1 ? '' : 's'} tracked${topicClusterCounts.candidate ? ` · ${topicClusterCounts.candidate} to review` : ''}`} &rsaquo;
+          ) : (
+            <Link href={`/clients/${client.id}/settings/business-profile`} className="text-tiny text-muted" style={{ marginTop: 6, display: 'inline-block' }}>
+              Not classified yet &rsaquo;
             </Link>
-          </div>
+          )}
         </div>
         <span className={`pill ${client.status === 'tracked' ? 'pill-tracked' : 'pill-lead'}`}>
           {client.status}
