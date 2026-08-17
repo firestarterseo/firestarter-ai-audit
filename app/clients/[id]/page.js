@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { getClientWithRuns, getClientCompetitors, getClientOpportunities, sanitizeClient } from '../../../lib/data'
 import { normalizeDomain } from '../../../lib/nonCompetitorDomains'
-import { getClientIndustryProfile } from '../../../lib/clientIndustryIntelligence'
 import RunAuditButton from './RunAuditButton'
 import ClientActions from './ClientActions'
 import SchemaWizard from './SchemaWizard'
@@ -120,27 +119,13 @@ export default async function ClientDetailPage({ params }) {
   const { client, runs } = await getClientWithRuns(id)
   const competitors = await getClientCompetitors(id)
   const opportunities = await getClientOpportunities(id)
-  // Read-only summary only -- the full editable Detected Business Context
-  // experience lives at /clients/[id]/settings/business-profile (Client
-  // Settings -> Business Profile), not inside this pillar/audit page. See
-  // that page's header comment for the UX rationale (2026-08-17 placement
-  // correction).
-  //
-  // The header below deliberately shows only verticalSubindustry/specialty/
-  // businessModel here -- NOT geography or industry, which are already
-  // shown one line up via client.city/region/category. Client identity
-  // should establish identity + a little shared context, not restate the
-  // same facts twice or turn into a status dashboard (2026-08-17 header
-  // decluttering correction -- see the Topic & Prompt Intelligence status,
-  // which used to sit here too, now living only at Client Settings ->
-  // Topic & Prompt Intelligence and the Client Settings link, not beside
-  // business identity).
-  const businessProfile = await getClientIndustryProfile(id)
-  const contextChips = [
-    businessProfile.verticalSubindustry?.value,
-    businessProfile.specialty?.value,
-    businessProfile.businessModel?.value
-  ].filter(Boolean)
+  // Client / Industry Intelligence (getClientIndustryProfile) is NOT read
+  // here (2026-08-17 removal correction) -- the client header shows only
+  // identity + location/broad category + tracking status, nothing from the
+  // classification system. Specialty/services/business model are inputs to
+  // that system, not information the AM needs repeated on every pillar
+  // screen. The full profile remains editable at Client Settings ->
+  // Business Profile (/clients/[id]/settings/business-profile).
   const latestRun = runs[0] || null
   const pillarsByKey = new Map((latestRun?.pillars || []).map(p => [p.pillar, p]))
 
@@ -216,17 +201,6 @@ export default async function ClientDetailPage({ params }) {
           <div className="text-small text-muted">
             {[client.city, client.region].filter(Boolean).join(', ')} {client.category ? `· ${client.category}` : ''}
           </div>
-          {contextChips.length > 0 ? (
-            <Link href={`/clients/${client.id}/settings/business-profile`} style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6, textDecoration: 'none' }}>
-              {contextChips.map(chip => (
-                <span key={chip} className="pill" style={{ textTransform: 'none' }}>{chip}</span>
-              ))}
-            </Link>
-          ) : (
-            <Link href={`/clients/${client.id}/settings/business-profile`} className="text-tiny text-muted" style={{ marginTop: 6, display: 'inline-block' }}>
-              Not classified yet &rsaquo;
-            </Link>
-          )}
         </div>
         <span className={`pill ${client.status === 'tracked' ? 'pill-tracked' : 'pill-lead'}`}>
           {client.status}
