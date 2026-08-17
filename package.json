@@ -9,7 +9,10 @@
     "start": "next start",
     "test:checkers": "for f in lib/checkers/scripts/*.js; do echo \"=== $f ===\"; node \"$f\" || exit 1; done",
     "test:client-profile": "node lib/clientProfileFields.test.js",
-    "test:client-intelligence": "node lib/clientIndustryIntelligence.test.js"
+    "test:client-intelligence": "node lib/clientIndustryIntelligence.test.js",
+    "test:prompt-cadence": "node lib/promptCadenceScheduler.test.js",
+    "test:prompt-topic-intelligence-pure": "node lib/promptTopicIntelligence.pure.test.js",
+    "test:prompt-topic-intelligence": "node lib/promptTopicIntelligence.test.js"
   },
   "dependencies": {
     "@fontsource/fjalla-one": "^5.3.0",

@@ -21,7 +21,10 @@ export default function NewClientPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to create client')
-      router.push(`/clients/${data.client.id}`)
+      // Client setup starts with Business Profile, not the audit page --
+      // this is where the first automatic Client/Industry Intelligence
+      // classification pass happens (see settings/business-profile/page.js).
+      router.push(`/clients/${data.client.id}/settings/business-profile`)
     } catch (err) {
       setError(err.message)
       setSubmitting(false)

@@ -1,6 +1,8 @@
+import Link from 'next/link'
 import { getClientWithRuns, getClientCompetitors, getClientOpportunities, sanitizeClient } from '../../../lib/data'
-import { getClientIndustryProfile } from '../../../lib/clientIndustryIntelligence'
 import { normalizeDomain } from '../../../lib/nonCompetitorDomains'
+import { getClientIndustryProfile } from '../../../lib/clientIndustryIntelligence'
+import { getTopicClustersForClient } from '../../../lib/topicClusters'
 import RunAuditButton from './RunAuditButton'
 import ClientActions from './ClientActions'
 import SchemaWizard from './SchemaWizard'
@@ -10,7 +12,6 @@ import TechnicalFoundationWizard from './TechnicalFoundationWizard'
 import ContentAuthorityWizard from './ContentAuthorityWizard'
 import AiGeoVisibilityWizard from './AiGeoVisibilityWizard'
 import CompetitivePositionWizard from './CompetitivePositionWizard'
-import ClientIntelligenceCard from './ClientIntelligenceCard'
 
 export const dynamic = 'force-dynamic'
 
@@ -120,11 +121,20 @@ export default async function ClientDetailPage({ params }) {
   const { client, runs } = await getClientWithRuns(id)
   const competitors = await getClientCompetitors(id)
   const opportunities = await getClientOpportunities(id)
-  // Client/Industry Intelligence (Phase 1b) -- read-only here; all
-  // classification/confirmation actions live in ClientIntelligenceCard,
-  // a Client Component, so this Server Component just fetches the
-  // current profile once via the canonical accessor and hands it down.
-  const industryProfile = await getClientIndustryProfile(id)
+  // Read-only summary only -- the full editable Detected Business Context
+  // experience lives at /clients/[id]/business-profile (Client Settings ->
+  // Business Profile), not inside this pillar/audit page. See that page's
+  // header comment for the UX rationale (2026-08-17 placement correction).
+  const businessProfile = await getClientIndustryProfile(id)
+  // Same read-only-summary treatment as Business Profile above -- the full
+  // AM review experience (approve/edit/reject, discovery trigger) lives at
+  // /clients/[id]/settings/topic-intelligence, not here. See that page's
+  // header comment.
+  const topicClusters = await getTopicClustersForClient(id)
+  const topicClusterCounts = {
+    benchmark: topicClusters.filter(c => c.status === 'benchmark').length,
+    candidate: topicClusters.filter(c => c.status === 'candidate').length
+  }
   const latestRun = runs[0] || null
   const pillarsByKey = new Map((latestRun?.pillars || []).map(p => [p.pillar, p]))
 
@@ -198,7 +208,17 @@ export default async function ClientDetailPage({ params }) {
           <h1 style={{ marginBottom: 4 }}>{client.name}</h1>
           <div className="text-small text-muted">{client.url}</div>
           <div className="text-small text-muted">
-            {industryProfile.summary || `${[client.city, client.region].filter(Boolean).join(', ')} ${client.category ? `· ${client.category}` : ''}`}
+            {[client.city, client.region].filter(Boolean).join(', ')} {client.category ? `· ${client.category}` : ''}
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
+            <Link href={`/clients/${client.id}/settings/business-profile`} className="pill" style={{ textTransform: 'none' }}>
+              {businessProfile.summary || 'Business profile not detected yet'} &rsaquo;
+            </Link>
+            <Link href={`/clients/${client.id}/settings/topic-intelligence`} className="pill" style={{ textTransform: 'none' }}>
+              {topicClusters.length === 0
+                ? 'No tracked topics yet'
+                : `${topicClusterCounts.benchmark} topic${topicClusterCounts.benchmark === 1 ? '' : 's'} tracked${topicClusterCounts.candidate ? ` · ${topicClusterCounts.candidate} to review` : ''}`} &rsaquo;
+            </Link>
           </div>
         </div>
         <span className={`pill ${client.status === 'tracked' ? 'pill-tracked' : 'pill-lead'}`}>
@@ -207,6 +227,7 @@ export default async function ClientDetailPage({ params }) {
         <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
           <RunAuditButton clientId={client.id} />
           <ClientActions clientId={client.id} status={client.status} />
+          <Link href={`/clients/${client.id}/settings`} className="text-tiny text-muted">Client Settings</Link>
         </div>
       </div>
 
@@ -229,8 +250,6 @@ export default async function ClientDetailPage({ params }) {
           No audits run yet -- set up AI-visibility test terms below, then click &ldquo;Run audit now&rdquo; to grade this client for the first time.
         </p>
       )}
-
-      <ClientIntelligenceCard clientId={client.id} initialProfile={industryProfile} />
 
       <PillarsBoard pillars={pillars} />
 
