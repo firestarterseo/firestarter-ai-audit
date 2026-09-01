@@ -14,7 +14,8 @@
     "test:prompt-topic-intelligence-pure": "node lib/promptTopicIntelligence.pure.test.js",
     "test:prompt-topic-intelligence": "node lib/promptTopicIntelligence.test.js",
     "test:opportunity-lifecycle-pure": "node lib/opportunityLifecycle.pure.test.js",
-    "test:opportunity-lifecycle": "node lib/opportunityLifecycle.test.js"
+    "test:opportunity-lifecycle": "node lib/opportunityLifecycle.test.js",
+    "test:source-citation-pure": "node lib/sourceCitation.pure.test.js"
   },
   "dependencies": {
     "@fontsource/fjalla-one": "^5.3.0",
