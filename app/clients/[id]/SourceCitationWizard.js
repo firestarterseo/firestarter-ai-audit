@@ -14,12 +14,16 @@ import OpportunityCard from './OpportunityCard'
 // table. No score anywhere: Diagnosis is descriptive counts only.
 //
 // Data model: `landscape` is the already-fetched, already-computed prop
-// from lib/data.js#getClientSourceLandscape (a Server Component read --
-// client_sources/opportunities/topic_clusters rows plus each
-// opportunity's priorityDimensions/statusTrack/preparedWork already
-// resolved server-side). Rendering this component makes ZERO LLM/API
-// calls on its own; every fetch() below only fires in response to an
-// explicit AM click (approve/reject/handoff/verify), never on render or
+// from lib/sourceCitation.js#getSourceLandscape (a Server Component read --
+// client_sources/opportunities rows plus own-site-citation analysis;
+// see app/clients/[id]/page.js's ENABLE_SOURCE_CITATION_PILLAR wiring for
+// the call site). NOTE (2026-09-01, Phase 1 trace): getSourceLandscape's
+// returned opportunities do NOT currently have priorityDimensions/
+// statusTrack/preparedWork attached the way this comment previously
+// claimed -- see the Phase 1 report's "remaining workflow gaps" for this
+// known, not-yet-fixed gap. Rendering this component still makes ZERO
+// LLM/API calls on its own; every fetch() below only fires in response to
+// an explicit AM click (approve/reject/handoff/verify), never on render or
 // step navigation.
 //
 // Raw evidence stays behind <details> drill-downs throughout, per the
@@ -358,7 +362,23 @@ export default function SourceCitationWizard({ clientId, landscape }) {
                     preparedWork={o.preparedWork}
                     onApprove={busyId ? undefined : (opp) => runLifecycleAction(opp.id, 'approve')}
                     onReject={busyId ? undefined : (opp) => runLifecycleAction(opp.id, 'reject', { reason: 'am_do_nothing' })}
-                    onRequestVerification={busyId ? undefined : (opp) => runLifecycleAction(opp.id, 'request_verification')}
+                    // No onRequestVerification here (Phase 1.1, 2026-09-01):
+                    // this is the review/browse step, before execution has
+                    // even happened -- lib/opportunityLifecycle.js's
+                    // requestVerification() now REJECTS a request until
+                    // execution_status is "executed"/"human_completed" (see
+                    // validateExecutionGate's 'verify' case), so a "Verify
+                    // now" button here would almost always just error. The
+                    // real, correctly-gated "Mark ready for verification"
+                    // control lives in the Execute & verify step (5) below,
+                    // once there's actually something to verify.
+                    // No onEditThenApprove either: OpportunityCard's "Edit
+                    // then approve" button has no real edited content to
+                    // approve without a prepared-work editing UI, which
+                    // this pass deliberately does not invent (see the
+                    // lifecycle route's edit_then_approve comment) -- wiring
+                    // it would fabricate an "edited" history event for
+                    // content nobody actually edited.
                   />
                 ))}
               </div>
@@ -389,7 +409,14 @@ export default function SourceCitationWizard({ clientId, landscape }) {
                     preparedWork={o.preparedWork}
                     onApprove={busyId ? undefined : (opp) => runLifecycleAction(opp.id, 'approve')}
                     onReject={busyId ? undefined : (opp) => runLifecycleAction(opp.id, 'reject', { reason: 'am_do_nothing' })}
-                    onRequestVerification={busyId ? undefined : (opp) => runLifecycleAction(opp.id, 'request_verification')}
+                    // onRequestVerification intentionally omitted here too
+                    // (see step 4's comment) -- OpportunityCard's own
+                    // "Verify now" button only ever renders once
+                    // verification_status is ALREADY 'ready_to_verify', at
+                    // which point it would just needlessly re-request the
+                    // same state. The real transition INTO ready_to_verify
+                    // is the "Mark ready for verification" button below,
+                    // shown only once execution/handoff genuinely completed.
                   />
                   {o.execution_capability === 'red' && o.approval_status === 'approved' && o.execution_status !== 'human_completed' && (
                     <div className="cta-row" style={{ marginTop: 6 }}>
@@ -408,6 +435,25 @@ export default function SourceCitationWizard({ clientId, landscape }) {
                           Mark human-completed
                         </button>
                       )}
+                    </div>
+                  )}
+                  {/* PHASE 1.1 (2026-09-01) -- the closed gap: this is the ONLY
+                      control that moves an opportunity from verification_status
+                      'not_ready' into 'ready_to_verify'. Shown only once
+                      execution genuinely completed (GREEN/YELLOW: 'executed'
+                      via executeOpportunity; RED: 'human_completed' via
+                      recordHumanCompleted above) -- lib/opportunityLifecycle.js's
+                      requestVerification() independently re-enforces this via
+                      validateExecutionGate(row, 'verify'), so even a stale/buggy
+                      UI state can't fire this before real work is done. Hidden
+                      once verification_status has already moved past 'not_ready'
+                      (ready_to_verify/verified/etc.), so it never re-appears
+                      after the AM has already requested it once. */}
+                  {['executed', 'human_completed'].includes(o.execution_status) && o.verification_status === 'not_ready' && (
+                    <div className="cta-row" style={{ marginTop: 6 }}>
+                      <button className="btn btn-secondary" disabled={busyId === o.id} onClick={() => runLifecycleAction(o.id, 'request_verification')}>
+                        Mark ready for verification
+                      </button>
                     </div>
                   )}
                   {o.verification_status === 'ready_to_verify' && (

@@ -15,7 +15,10 @@
     "test:prompt-topic-intelligence": "node lib/promptTopicIntelligence.test.js",
     "test:opportunity-lifecycle-pure": "node lib/opportunityLifecycle.pure.test.js",
     "test:opportunity-lifecycle": "node lib/opportunityLifecycle.test.js",
-    "test:source-citation-pure": "node lib/sourceCitation.pure.test.js"
+    "test:verification-transition": "node lib/opportunityLifecycle.verificationTransition.test.js",
+    "test:source-citation-pure": "node lib/sourceCitation.pure.test.js",
+    "test:source-citation-landscape-enrichment": "node lib/sourceCitation.landscapeEnrichment.test.js",
+    "test:opportunities-lifecycle-route": "node \"app/api/clients/[id]/opportunities/[opportunityId]/lifecycle/route.test.js\""
   },
   "dependencies": {
     "@fontsource/fjalla-one": "^5.3.0",

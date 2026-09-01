@@ -10,8 +10,18 @@ import TechnicalFoundationWizard from './TechnicalFoundationWizard'
 import ContentAuthorityWizard from './ContentAuthorityWizard'
 import AiGeoVisibilityWizard from './AiGeoVisibilityWizard'
 import CompetitivePositionWizard from './CompetitivePositionWizard'
+import SourceCitationWizard from './SourceCitationWizard'
+import { getSourceLandscape } from '../../../lib/sourceCitation'
 
 export const dynamic = 'force-dynamic'
+
+// AI Source & Citation Presence (Phase 1 connective tissue, 2026-09-01) is
+// gated behind an explicit dev feature flag -- NOT NODE_ENV -- because its
+// database contract has not yet been verified against the live Supabase
+// schema (see RECOVERY-STATUS.md §4/§5). Leaving this flag unset/false
+// means every one of the six live pillars below renders exactly as before
+// this change; nothing about their behavior depends on this flag.
+const ENABLE_SOURCE_CITATION_PILLAR = process.env.ENABLE_SOURCE_CITATION_PILLAR === 'true'
 
 const PILLAR_LABELS = {
   schema_structure: 'Schema & Structure',
@@ -19,7 +29,8 @@ const PILLAR_LABELS = {
   technical_foundation: 'Technical Foundation',
   ai_geo_visibility: 'AI & GEO Visibility',
   content_authority: 'Content Authority',
-  competitive_position: 'Competitive Position'
+  competitive_position: 'Competitive Position',
+  ai_source_citation_presence: 'AI Source & Citation Presence'
 }
 
 // Entity & Citation Authority sits right after Schema & Structure: both are
@@ -28,7 +39,13 @@ const PILLAR_LABELS = {
 // (real backlinks + AI citations from recognized authority domains -- see
 // lib/checkers/entity-citation-authority-checker.js). The other 5 keep
 // their original relative order.
-const PILLAR_ORDER = ['schema_structure', 'entity_citation_authority', 'technical_foundation', 'ai_geo_visibility', 'content_authority', 'competitive_position']
+const LIVE_PILLAR_ORDER = ['schema_structure', 'entity_citation_authority', 'technical_foundation', 'ai_geo_visibility', 'content_authority', 'competitive_position']
+
+// Appended only behind ENABLE_SOURCE_CITATION_PILLAR -- when the flag is
+// off (the default), PILLAR_ORDER is exactly LIVE_PILLAR_ORDER, unchanged.
+const PILLAR_ORDER = ENABLE_SOURCE_CITATION_PILLAR
+  ? [...LIVE_PILLAR_ORDER, 'ai_source_citation_presence']
+  : LIVE_PILLAR_ORDER
 
 // As of 2026-08-13, Competitive Position is built (see
 // lib/checkers/competitive-position-checker.js) -- it just may not have
@@ -129,6 +146,26 @@ export default async function ClientDetailPage({ params }) {
   const latestRun = runs[0] || null
   const pillarsByKey = new Map((latestRun?.pillars || []).map(p => [p.pillar, p]))
 
+  // AI Source & Citation Presence landscape -- only fetched behind the
+  // feature flag, so a disabled flag means zero extra reads/behavior
+  // change for this page beyond what already existed. Wrapped in try/catch
+  // rather than left to throw: the live Supabase schema for this pillar's
+  // tables (client_sources, cited_page_inspections, and the widened
+  // presence-status constraint) has not been verified yet (see
+  // RECOVERY-STATUS.md §4) -- if enabling this flag against an
+  // unverified/mismatched schema throws, the six existing live pillars
+  // below must still render normally rather than the whole client page
+  // failing to load.
+  let sourceLandscape = null
+  if (ENABLE_SOURCE_CITATION_PILLAR) {
+    try {
+      sourceLandscape = await getSourceLandscape(client.id)
+    } catch (e) {
+      console.error(`[ai_source_citation_presence] getSourceLandscape failed for client ${client.id}:`, e.message || e)
+      sourceLandscape = { sources: [], opportunities: [], ownSiteCitations: null, diagnosis: {}, _fetchError: e.message || String(e) }
+    }
+  }
+
   // Pillars as plain data + pre-resolved children JSX, handed to the
   // (client-side) PillarsBoard for the tile/expand UI. The board itself
   // never needs to know what SchemaGenerator/TestPromptsManager/etc. are --
@@ -187,7 +224,11 @@ export default async function ClientDetailPage({ params }) {
                   clientDomain={normalizeDomain(client.domain) || normalizeDomain(client.url)}
                 />
               )
-              : null,
+              : key === 'ai_source_citation_presence'
+                ? (
+                  <SourceCitationWizard clientId={client.id} landscape={sourceLandscape} />
+                )
+                : null,
     children: null
   }))
 
