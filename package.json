@@ -17,6 +17,7 @@
     "test:opportunity-lifecycle": "node lib/opportunityLifecycle.test.js",
     "test:verification-transition": "node lib/opportunityLifecycle.verificationTransition.test.js",
     "test:source-citation-pure": "node lib/sourceCitation.pure.test.js",
+    "test:web-page-fetch-pure": "node lib/webPageFetch.pure.test.js",
     "test:source-citation-landscape-enrichment": "node lib/sourceCitation.landscapeEnrichment.test.js",
     "test:opportunities-lifecycle-route": "node \"app/api/clients/[id]/opportunities/[opportunityId]/lifecycle/route.test.js\""
   },
