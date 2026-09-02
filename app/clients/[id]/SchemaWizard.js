@@ -5,6 +5,34 @@ import SchemaGenerator from './SchemaGenerator'
 import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 import { computeRecommendedSet } from '../../../lib/schemaPagePriority'
 import { toggleQueuedPath, resolveOpenPath } from '../../../lib/schemaPageSelection'
+import { deriveHomepageState, deriveStateFromAnalysis, excludedPathsFromStates, getPageState } from '../../../lib/schemaPageLifecycle'
+
+// RECOMMENDATION_BATCH_SIZE -- PRODUCT DECISION #2: "RECOMMENDATIONS SHOULD
+// COME IN BATCHES OF 10... This is: NEXT BEST 10, not: TOP 10 FOREVER."
+// Passed as both targetMin and targetMax to computeRecommendedSet (see that
+// function's header for how "next batch" advancement falls out of
+// excludePaths with no separate batch-index state needed).
+const RECOMMENDATION_BATCH_SIZE = 10
+
+// PAGE_STATE_LABELS / PAGE_STATE_TONE -- display-only presentation for
+// lib/schemaPageLifecycle.js's PAGE_STATES, used by PageRow for every
+// non-Home page (Home keeps its own real "Analyzed -- X / Y checks" label,
+// unchanged -- PRODUCT DECISION #12 requires not touching its existing
+// display, only its recommendation/exclusion behavior).
+const PAGE_STATE_LABELS = {
+  UNANALYZED: 'Not analyzed yet',
+  ACTIONABLE_GAP: 'Actionable gap found',
+  NO_ACTION_NEEDED: 'No action needed',
+  WORK_IN_PROGRESS: 'Work in progress',
+  COMPLETED: 'Completed'
+}
+const PAGE_STATE_TONE = {
+  UNANALYZED: 'muted',
+  ACTIONABLE_GAP: 'bad',
+  NO_ACTION_NEEDED: 'good',
+  WORK_IN_PROGRESS: 'caution',
+  COMPLETED: 'good'
+}
 
 // PAGE_TYPE_OPTIONS / PRIORITY_TIER_OPTIONS -- literal duplicates of the
 // canonical lists in lib/sitemapDiscovery.js / lib/schemaPagePriority.js
@@ -268,10 +296,14 @@ const TIER_TONE = {
 // the checkbox, never inferred from "open"). A page can be open without
 // being queued, queued without being open, both, or neither -- the UI
 // never collapses these into one ambiguous highlight.
-function PageRow({ dossier, isOpen, isQueued, onOpen, onToggleQueue, showRecommendedBadge, homeChecksPassing, homeChecksTotal }) {
+function PageRow({ dossier, isOpen, isQueued, onOpen, onToggleQueue, showRecommendedBadge, homeChecksPassing, homeChecksTotal, pageState, isAnalyzing }) {
   const isHome = dossier.type === 'Home'
-  const statusTone = isHome ? (homeChecksPassing >= homeChecksTotal * 0.85 ? 'good' : 'bad') : 'muted'
-  const statusText = isHome ? `Analyzed — ${homeChecksPassing} / ${homeChecksTotal} checks` : 'Not analyzed yet'
+  // Home keeps its own real, already-audited label untouched (PRODUCT
+  // DECISION #12). Every other page's status now reflects its real
+  // lib/schemaPageLifecycle.js state -- "Not analyzed yet" until an AM
+  // actually runs "Analyze page," never a guess.
+  const statusTone = isHome ? (homeChecksPassing >= homeChecksTotal * 0.85 ? 'good' : 'bad') : (isAnalyzing ? 'caution' : PAGE_STATE_TONE[pageState] || 'muted')
+  const statusText = isHome ? `Analyzed — ${homeChecksPassing} / ${homeChecksTotal} checks` : (isAnalyzing ? 'Analyzing…' : (PAGE_STATE_LABELS[pageState] || 'Not analyzed yet'))
 
   return (
     <div className={`page-row${isOpen ? ' selected' : ''}`} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr auto', alignItems: 'center', gap: 10 }}>
@@ -314,6 +346,18 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   const [pageSearch, setPageSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('All')
   const [tierFilter, setTierFilter] = useState('All')
+  const [showAllPages, setShowAllPages] = useState(false)
+
+  // -------------------------------------------------------------------
+  // Phase B page-analysis state (2026-09-02) -- see lib/pageAnalysis.js and
+  // lib/schemaPageLifecycle.js's headers for why this is real fetched
+  // evidence (via the analyze-page API route), kept as plain React state
+  // (current-run / UI-state-only, same as queuedPaths above) rather than
+  // persisted anywhere.
+  // -------------------------------------------------------------------
+  const [pageAnalyses, setPageAnalyses] = useState(() => new Map()) // path -> lib/pageAnalysis.js result
+  const [analyzingPaths, setAnalyzingPaths] = useState(() => new Set()) // paths with an in-flight "Analyze page" request
+  const [analysisRequestErrors, setAnalysisRequestErrors] = useState(() => new Map()) // path -> message, only for a failed CALL to our own route (network/HTTP) -- a page that fetched but came back non-HTML/404/etc is a normal, successful analyzePage() result, not an error here
 
   // Best-effort fetch of this client's AM-CONFIRMED profile fields (reuses
   // the existing GET /api/clients/[id]/profile-fields route -- no new
@@ -355,9 +399,37 @@ export default function SchemaWizard({ pillar, clientId, client }) {
       : [{ path: '/', type: 'Home', sourceSitemap: null, classificationSource: 'url_pattern', classificationConfidence: 'high', classificationReason: 'This is the homepage.' }]
   ), [realPages])
 
+  // pageStates -- every page's real lib/schemaPageLifecycle.js state,
+  // derived fresh on every render from its two real sources: the
+  // homepage's existing 7-check pillar result (PRODUCT DECISION #12), and
+  // this browser session's own "Analyze page" results (PRODUCT DECISION
+  // #8/#10). Deliberately NOT its own independent useState -- deriving it
+  // means it can never drift out of sync with `pillar` or `pageAnalyses`,
+  // and a page's state is always exactly what those two real sources say
+  // right now, never a stale copy.
+  const pageStates = useMemo(() => {
+    const states = new Map()
+    if (pillar) {
+      const checksPassing = (pillar.checks || []).filter(c => c.status === 'pass').length
+      const checksTotal = (pillar.checks || []).length || 7
+      states.set('/', deriveHomepageState({ checksPassing, checksTotal }))
+    }
+    for (const [path, analysis] of pageAnalyses.entries()) {
+      states.set(path, deriveStateFromAnalysis(analysis))
+    }
+    return states
+  }, [pillar, pageAnalyses])
+
+  // excludePaths -- PRODUCT DECISION #3 / #11: a page in a resolved state
+  // (today: NO_ACTION_NEEDED -- see lib/schemaPageLifecycle.js) never
+  // occupies a recommendation-batch slot. This is what actually fixes the
+  // live bug: once the homepage is 7/7, its pageStates entry is
+  // NO_ACTION_NEEDED, so it lands here and computeRecommendedSet skips it.
+  const excludePaths = useMemo(() => excludedPathsFromStates(pageStates), [pageStates])
+
   const { recommended, all } = useMemo(
-    () => computeRecommendedSet(candidatePages, clientProfile),
-    [candidatePages, clientProfile]
+    () => computeRecommendedSet(candidatePages, clientProfile, { targetMin: RECOMMENDATION_BATCH_SIZE, targetMax: RECOMMENDATION_BATCH_SIZE, excludePaths }),
+    [candidatePages, clientProfile, excludePaths]
   )
 
   const recommendedPaths = useMemo(() => new Set(recommended.map(d => d.path)), [recommended])
@@ -377,6 +449,54 @@ export default function SchemaWizard({ pillar, clientId, client }) {
 
   function toggleQueued(path) {
     setQueuedPaths(prev => toggleQueuedPath(prev, path))
+  }
+
+  // analyzePageNow(path) -- PRODUCT DECISION #6/#8's real QUEUED PAGE ->
+  // OPEN/ANALYZE PAGE -> FETCH THAT PAGE -> RUN PAGE-TYPE-APPROPRIATE
+  // SCHEMA ANALYSIS transition. Calls the analyze-page route (server-side,
+  // since the browser can't fetch an arbitrary client site directly) for
+  // exactly the one page an AM asked about -- never the whole sitemap, and
+  // never automatically. A page's own classification metadata (type,
+  // source, confidence) travels along so the route can run the correct
+  // page-type check list without re-walking the sitemap to re-derive it.
+  async function analyzePageNow(path) {
+    if (analyzingPaths.has(path)) return // already in flight -- never double-fire on a fast double-click
+    const dossier = all.find(d => d.path === path)
+    setAnalyzingPaths(prev => new Set(prev).add(path))
+    setAnalysisRequestErrors(prev => {
+      if (!prev.has(path)) return prev
+      const next = new Map(prev)
+      next.delete(path)
+      return next
+    })
+    try {
+      const res = await fetch(`/api/clients/${clientId}/schema/analyze-page`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path,
+          page: dossier ? {
+            type: dossier.type,
+            classificationSource: dossier.classificationSource,
+            classificationConfidence: dossier.classificationConfidence
+          } : undefined
+        })
+      })
+      const body = await res.json()
+      if (!res.ok) {
+        setAnalysisRequestErrors(prev => new Map(prev).set(path, body?.error || `Request failed (HTTP ${res.status}).`))
+        return
+      }
+      setPageAnalyses(prev => new Map(prev).set(path, body))
+    } catch (e) {
+      setAnalysisRequestErrors(prev => new Map(prev).set(path, 'Could not reach the server to analyze this page.'))
+    } finally {
+      setAnalyzingPaths(prev => {
+        const next = new Set(prev)
+        next.delete(path)
+        return next
+      })
+    }
   }
 
   return (
@@ -482,8 +602,11 @@ export default function SchemaWizard({ pillar, clientId, client }) {
               onOpen: setOpenPath,
               onToggleQueue: toggleQueued,
               homeChecksPassing,
-              homeChecksTotal
+              homeChecksTotal,
+              pageState: getPageState(pageStates, dossier.path),
+              isAnalyzing: analyzingPaths.has(dossier.path)
             })
+            const queuedDossiers = all.filter(d => queuedPaths.has(d.path))
             return (
               <div>
                 <div className="card" style={{ padding: 18, marginBottom: 14 }}>
@@ -497,47 +620,86 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                 </div>
 
                 <div className="card" style={{ padding: 18, marginBottom: 14 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Recommended for schema review ({recommended.length})</div>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Next {RECOMMENDATION_BATCH_SIZE} recommended pages ({recommended.length})</div>
+                  <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
+                    A rolling batch, not a fixed top {RECOMMENDATION_BATCH_SIZE} -- once a page here needs no more action, the next-best eligible page from the full discovered universe takes its place. Checking a box below adds a page to the Schema work queue; it does not analyze or queue it on its own.
+                  </p>
                   {recommended.length === 0 && (
-                    <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>No pages met the bar for recommendation this run -- see All discovered pages below.</p>
+                    <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>No pages met the bar for recommendation this run -- see &ldquo;View all discovered pages&rdquo; below.</p>
                   )}
                   <div style={{ display: 'grid', gap: 6 }}>
                     {recommended.map(dossier => <PageRow {...rowProps(dossier)} showRecommendedBadge={false} />)}
                   </div>
                 </div>
 
-                <div className="card" style={{ padding: 18, marginBottom: 14 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>All discovered pages ({all.length}{realPages && realPages.length >= 150 ? '+' : ''})</div>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                    <input
-                      type="text"
-                      placeholder="Search by path..."
-                      value={pageSearch}
-                      onChange={e => setPageSearch(e.target.value)}
-                      style={{ flex: '1 1 200px' }}
-                    />
-                    <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
-                      <option value="All">All page types</option>
-                      {PAGE_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                    <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
-                      <option value="All">All priority tiers</option>
-                      {PRIORITY_TIER_OPTIONS.map(t => <option key={t} value={t}>{TIER_LABELS[t]}</option>)}
-                    </select>
-                  </div>
-                  {filteredAll.length === 0 ? (
-                    <p className="text-tiny text-muted">No discovered pages match this filter.</p>
-                  ) : (
-                    <div style={{ display: 'grid', gap: 6 }}>
-                      {filteredAll.map(dossier => (
-                        <PageRow {...rowProps(dossier)} showRecommendedBadge={recommendedPaths.has(dossier.path)} />
-                      ))}
-                    </div>
-                  )}
-                  {!realPages && (
-                    <p className="text-tiny text-muted" style={{ marginTop: 10 }}>
-                      This run predates the real sitemap page list, or the sitemap fetch failed -- re-run the audit to see this client&rsquo;s actual pages here.
+                {queuedDossiers.length > 0 && (
+                  <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Schema work queue ({queuedDossiers.length})</div>
+                    <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
+                      Pages an AM has intentionally chosen for schema work -- separate from Recommended (the system&rsquo;s suggestion) and from Open (whichever page is currently shown below). Queuing a page doesn&rsquo;t analyze it by itself; click Analyze page to actually fetch it and run its real checks.
                     </p>
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      {queuedDossiers.map(dossier => {
+                        const state = getPageState(pageStates, dossier.path)
+                        const isAnalyzing = analyzingPaths.has(dossier.path)
+                        const reqError = analysisRequestErrors.get(dossier.path)
+                        return (
+                          <div key={dossier.path} className="page-row" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', alignItems: 'center', gap: 10 }}>
+                            <span className="type-badge" style={{ cursor: 'default' }}>{dossier.type}</span>
+                            <span className="path" onClick={() => setOpenPath(dossier.path)} style={{ cursor: 'pointer', textDecoration: dossier.path === effectiveOpenPath ? 'underline' : 'none' }}>
+                              {dossier.path}
+                            </span>
+                            <span className={`status ${isAnalyzing ? 'caution' : PAGE_STATE_TONE[state] || 'muted'}`}>
+                              {isAnalyzing ? 'Analyzing…' : (reqError || PAGE_STATE_LABELS[state] || 'Not analyzed yet')}
+                            </span>
+                            <button className="btn btn-secondary" disabled={isAnalyzing || dossier.type === 'Home'} onClick={() => analyzePageNow(dossier.path)}>
+                              {dossier.type === 'Home' ? 'Already analyzed' : (state === 'UNANALYZED' ? 'Analyze page' : 'Re-analyze page')}
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+                  <button className="btn btn-secondary" onClick={() => setShowAllPages(v => !v)}>
+                    {showAllPages ? 'Hide all discovered pages' : `View all discovered pages (${all.length}${realPages && realPages.length >= 150 ? '+' : ''})`}
+                  </button>
+                  {showAllPages && (
+                    <div style={{ marginTop: 14 }}>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                        <input
+                          type="text"
+                          placeholder="Search by path..."
+                          value={pageSearch}
+                          onChange={e => setPageSearch(e.target.value)}
+                          style={{ flex: '1 1 200px' }}
+                        />
+                        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
+                          <option value="All">All page types</option>
+                          {PAGE_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
+                          <option value="All">All priority tiers</option>
+                          {PRIORITY_TIER_OPTIONS.map(t => <option key={t} value={t}>{TIER_LABELS[t]}</option>)}
+                        </select>
+                      </div>
+                      {filteredAll.length === 0 ? (
+                        <p className="text-tiny text-muted">No discovered pages match this filter.</p>
+                      ) : (
+                        <div style={{ display: 'grid', gap: 6 }}>
+                          {filteredAll.map(dossier => (
+                            <PageRow {...rowProps(dossier)} showRecommendedBadge={recommendedPaths.has(dossier.path)} />
+                          ))}
+                        </div>
+                      )}
+                      {!realPages && (
+                        <p className="text-tiny text-muted" style={{ marginTop: 10 }}>
+                          This run predates the real sitemap page list, or the sitemap fetch failed -- re-run the audit to see this client&rsquo;s actual pages here.
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -554,13 +716,34 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                     </ul>
                     {openDossier.type === 'Home' ? (
                       <p className="text-tiny text-muted" style={{ margin: '0 0 10px' }}>
-                        This page has already been analyzed -- see &ldquo;What&rsquo;s missing&rdquo; for its real schema checks.
+                        {getPageState(pageStates, '/') === 'NO_ACTION_NEEDED'
+                          ? 'This page has already been analyzed and has no actionable schema gap -- no action needed.'
+                          : 'This page has already been analyzed -- see “What’s missing” for its real schema checks.'}
                       </p>
-                    ) : (
-                      <p className="text-tiny text-muted" style={{ margin: '0 0 10px' }}>
-                        Page-level analysis isn&rsquo;t built yet -- that&rsquo;s the next workflow step, not something this screen fakes. For now, use the checkbox or the button below to add this page to the schema work queue.
-                      </p>
-                    )}
+                    ) : (() => {
+                      const state = getPageState(pageStates, openDossier.path)
+                      const isAnalyzing = analyzingPaths.has(openDossier.path)
+                      const reqError = analysisRequestErrors.get(openDossier.path)
+                      return (
+                        <>
+                          <p className="text-tiny text-muted" style={{ margin: '0 0 10px' }}>
+                            {state === 'UNANALYZED' && !isAnalyzing && 'Not analyzed yet -- click Analyze page to fetch this page and run its real, page-type-appropriate schema checks (never the homepage’s 7 checks).'}
+                            {isAnalyzing && 'Fetching this page and running its schema checks now…'}
+                            {state === 'ACTIONABLE_GAP' && 'A real schema gap was found on this page -- see “See schema gaps” below.'}
+                            {state === 'NO_ACTION_NEEDED' && 'Analyzed -- no actionable schema gap found on this page.'}
+                            {reqError && ` (${reqError})`}
+                          </p>
+                          <button
+                            className="btn btn-secondary"
+                            disabled={isAnalyzing}
+                            style={{ marginRight: 8 }}
+                            onClick={() => analyzePageNow(openDossier.path)}
+                          >
+                            {state === 'UNANALYZED' ? 'Analyze page' : 'Re-analyze page'}
+                          </button>
+                        </>
+                      )
+                    })()}
                     <button
                       className={queuedPaths.has(openDossier.path) ? 'btn btn-secondary' : 'btn btn-primary'}
                       onClick={() => toggleQueued(openDossier.path)}
@@ -580,18 +763,118 @@ export default function SchemaWizard({ pillar, clientId, client }) {
             <button className="btn btn-secondary" onClick={() => setStep(1)}>&larr; Back</button>
             {effectiveOpenPath === '/' ? (
               <button className="btn btn-primary" onClick={() => setStep(3)}>See gaps for the homepage &rarr;</button>
-            ) : (
-              <button className="btn btn-secondary" disabled title="Page-level analysis isn't built yet -- use Add to schema work instead.">
-                Page-level gaps &mdash; not built yet
-              </button>
-            )}
+            ) : (() => {
+              // PRODUCT DECISION #7: this button is now genuinely contextual
+              // to the open/queued page instead of always routing to the
+              // homepage's gaps -- "ANALYZE PAGE" while unanalyzed, "SEE
+              // SCHEMA GAPS" once a real gap was found, disabled "NO ACTION
+              // NEEDED" once analysis confirms there's nothing to fix.
+              const state = getPageState(pageStates, effectiveOpenPath)
+              const isAnalyzing = analyzingPaths.has(effectiveOpenPath)
+              if (isAnalyzing) {
+                return <button className="btn btn-secondary" disabled>Analyzing…</button>
+              }
+              if (state === 'ACTIONABLE_GAP') {
+                return <button className="btn btn-primary" onClick={() => setStep(3)}>See schema gaps &rarr;</button>
+              }
+              if (state === 'NO_ACTION_NEEDED') {
+                return <button className="btn btn-secondary" disabled title="This page was analyzed and has no actionable schema gap.">No action needed</button>
+              }
+              return (
+                <button className="btn btn-primary" onClick={() => analyzePageNow(effectiveOpenPath)}>
+                  Analyze page &rarr;
+                </button>
+              )
+            })()}
           </div>
         </div>
       )}
 
       {step === 3 && (
         <div>
-          {pillar ? (() => {
+          {effectiveOpenPath !== '/' ? (() => {
+            // PRODUCT DECISION #9/#10: a non-homepage page's "What's
+            // missing" is the real, page-type-dispatched analysis-result
+            // contract from lib/pageAnalysis.js -- CURRENT SCHEMA /
+            // APPLICABLE / MISSING-INVALID / NOT APPLICABLE / ACTIONABLE
+            // SCHEMA GAP -- never the homepage's 7 checks.
+            const analysis = pageAnalyses.get(effectiveOpenPath)
+            const dossier = all.find(d => d.path === effectiveOpenPath)
+            if (!analysis) {
+              return (
+                <div className="card-empty" style={{ padding: 18 }}>
+                  <div className="text-small text-muted">This page hasn&rsquo;t been analyzed yet -- go back and click Analyze page.</div>
+                </div>
+              )
+            }
+            if (analysis.fetchState !== 'success') {
+              return (
+                <div className="card" style={{ padding: 18 }}>
+                  <div className="grade-title" style={{ marginBottom: 8 }}>{analysis.path} &mdash; could not be analyzed</div>
+                  <p className="text-small issue-why">
+                    {analysis.failureDetail || `Fetch failed (${analysis.failureCategory}).`} This is an honest fetch failure, not evidence the page has no schema -- try Re-analyze page once the issue above is resolved.
+                  </p>
+                </div>
+              )
+            }
+            const AnalysisListRow = ({ label, tone }) => (
+              <div className="issue-item" key={label}>
+                <span className={`issue-badge ${tone === 'good' ? 'issue-passing' : tone === 'bad' ? 'issue-critical' : 'issue-minor'}`}>
+                  {tone === 'good' ? 'Present' : tone === 'bad' ? 'Missing / invalid' : 'Not applicable'}
+                </span>
+                <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{label}</div>
+              </div>
+            )
+            return (
+              <div className="card" style={{ padding: 18 }}>
+                <div className="grade-title" style={{ marginBottom: 2 }}>{analysis.path}</div>
+                <div className="grade-sub" style={{ marginBottom: 4 }}>
+                  Classification: {analysis.classification.type} (source: {analysis.classification.source}, confidence: {analysis.classification.confidence})
+                </div>
+                <div className="grade-sub" style={{ marginBottom: 14 }}>
+                  Current schema on this page: {analysis.currentSchema.length > 0 ? analysis.currentSchema.join(', ') : 'None found'}
+                </div>
+
+                <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>
+                  Actionable schema gap: {analysis.actionableGap ? 'Yes' : 'No'}
+                </div>
+                {analysis.actionableGap ? (
+                  <p className="text-tiny text-muted" style={{ margin: '0 0 12px' }}>
+                    This page has a real, genuinely-applicable schema gap -- see &ldquo;Missing / invalid&rdquo; below. Prepared schema work for arbitrary page types is a later phase; queuing this page alone does not create that work automatically.
+                  </p>
+                ) : (
+                  <p className="text-tiny text-muted" style={{ margin: '0 0 12px' }}>
+                    No actionable gap -- every genuinely-applicable check for this page type either passed or doesn&rsquo;t apply here. This page is marked No action needed and will not appear in future recommendation batches.
+                  </p>
+                )}
+
+                {analysis.missingOrInvalid.length > 0 && (
+                  <>
+                    <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Missing / invalid</div>
+                    <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
+                      {analysis.missingOrInvalid.map(c => <AnalysisListRow key={c.id} label={c.label} tone="bad" />)}
+                    </div>
+                  </>
+                )}
+                {analysis.applicable.filter(c => !analysis.missingOrInvalid.some(m => m.id === c.id)).length > 0 && (
+                  <>
+                    <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Applicable and passing</div>
+                    <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
+                      {analysis.applicable.filter(c => !analysis.missingOrInvalid.some(m => m.id === c.id)).map(c => <AnalysisListRow key={c.id} label={c.label} tone="good" />)}
+                    </div>
+                  </>
+                )}
+                {analysis.notApplicable.length > 0 && (
+                  <>
+                    <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Not applicable to this page type</div>
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      {analysis.notApplicable.map(c => <AnalysisListRow key={c.id} label={c.label} tone="muted" />)}
+                    </div>
+                  </>
+                )}
+              </div>
+            )
+          })() : pillar ? (() => {
             const { generator, plugin } = schemaCheckGroups(pillar)
             const CheckGroupRow = ({ c }) => (
               <div key={c.label} className="issue-item">
@@ -639,7 +922,18 @@ export default function SchemaWizard({ pillar, clientId, client }) {
           )}
           <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(2)}>&larr; Pick a different page</button>
-            <button className="btn btn-primary" onClick={() => setStep(4)}>Fix with the generator &rarr;</button>
+            {effectiveOpenPath === '/' ? (
+              <button className="btn btn-primary" onClick={() => setStep(4)}>Fix with the generator &rarr;</button>
+            ) : (
+              // PRODUCT DECISION #10: "Do not create a Phase 3 opportunity
+              // merely because the page was queued." The Schema Generator
+              // (steps 4-6) is homepage/business-entity-specific; prepared
+              // schema work for an arbitrary page type's real gap is an
+              // explicitly later phase, not fabricated here.
+              <button className="btn btn-secondary" disabled title="Prepared schema work for this page is a later phase -- not built yet.">
+                Prepared schema work &mdash; not built yet
+              </button>
+            )}
           </div>
         </div>
       )}
