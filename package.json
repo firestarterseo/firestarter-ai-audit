@@ -22,6 +22,8 @@
     "test:discovery-observation-pure": "node lib/discoveryObservation.pure.test.js",
     "test:sitemap-discovery-pure": "node lib/sitemapDiscovery.pure.test.js",
     "test:sitemap-discovery": "node lib/sitemapDiscovery.test.js",
+    "test:schema-page-priority": "node lib/schemaPagePriority.test.js",
+    "test:schema-page-selection": "node lib/schemaPageSelection.test.js",
     "test:source-citation-landscape-enrichment": "node lib/sourceCitation.landscapeEnrichment.test.js",
     "test:opportunities-lifecycle-route": "node \"app/api/clients/[id]/opportunities/[opportunityId]/lifecycle/route.test.js\""
   },

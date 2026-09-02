@@ -1,8 +1,21 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import SchemaGenerator from './SchemaGenerator'
 import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
+import { computeRecommendedSet } from '../../../lib/schemaPagePriority'
+import { toggleQueuedPath, resolveOpenPath } from '../../../lib/schemaPageSelection'
+
+// PAGE_TYPE_OPTIONS / PRIORITY_TIER_OPTIONS -- literal duplicates of the
+// canonical lists in lib/sitemapDiscovery.js / lib/schemaPagePriority.js
+// (same "small, pure list, not worth a cross-module dependency for"
+// reasoning this file already uses for gradeClass below). Kept separate
+// deliberately: lib/sitemapDiscovery.js pulls in lib/webPageFetch.js (a
+// server-fetch module with no reason to ship to the browser bundle) just
+// to get one small display-filter list -- not worth it for a filter
+// dropdown's option set.
+const PAGE_TYPE_OPTIONS = ['Home', 'Service', 'Location', 'Article', 'Case Study', 'About', 'Contact', 'Utility/Legal', 'Other']
+const PRIORITY_TIER_OPTIONS = ['CORE', 'COMMERCIAL', 'PROOF', 'CONTENT', 'LOW_PRIORITY', 'OTHER']
 
 // Schema & Structure's wizard-style pillar detail (Phase 3 of the mockup ->
 // production sync -- see workflow-mockup.html's #pane-schema for the design
@@ -34,10 +47,28 @@ import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 // sitemap was an index -- lib/checkers/checker.js was treating a sitemap
 // index's own <loc> entries (child sitemap references) as if they were
 // pages. That's fixed at the source (see lib/sitemapDiscovery.js); every
-// row this step renders is now a real, classified page URL. Per-page
-// SCHEMA SCORING beyond the homepage is still not built -- that's the
-// "Not scored yet" status below, a different thing from page-type
-// classification (which every row now gets for real).
+// row this step renders is now a real, classified page URL.
+//
+// 2026-09-02, Phase A of the Schema page-workflow redesign: step 2 was
+// still just a flat, cosmetic list -- a real bug immediately after the
+// fix above showed the candidate list itself was capped WHILE WALKING the
+// sitemap hierarchy (in sitemap-fetch order), so an early, large
+// post-sitemap.xml could crowd out page-sitemap.xml's About/Contact/
+// Service pages entirely; classification never used the sitemap filename
+// as evidence (so e.g. a post-sitemap.xml URL with no "/blog/" segment
+// fell through to Uncategorized even though it's obviously a post); and
+// "selecting" a row was purely cosmetic -- the first row was always
+// highlighted regardless of any click, and no other step ever knew what
+// was "selected." This phase fixes discovery/classification at the source
+// (lib/sitemapDiscovery.js) and adds real prioritization
+// (lib/schemaPagePriority.js) plus a genuine two-state (open/queued)
+// selection UI. Per-page SCHEMA SCORING and generation are still not
+// built for anything but the homepage -- that's the honest "Not analyzed
+// yet" status below, a later phase, not faked here. The schema work
+// QUEUE built in this step is CURRENT-RUN / UI STATE ONLY (plain React
+// state) -- it does not survive a refresh or a new audit run yet; durable
+// tracking is planned for a later phase via the existing
+// lib/opportunityLifecycle.js machinery, not built here.
 
 // SCHEMA_CHECK_GROUPS -- which real check(group) it belongs to, and the
 // regex to find its matching real issue (for severity/why/recommendation)
@@ -198,10 +229,152 @@ function gradeClass(grade) {
   return 'grade-f'
 }
 
+// CLIENT_PROFILE_FIELD_KEYS -- the three Phase 1b client_profile_fields
+// keys this step matches page slugs against (see
+// lib/schemaPagePriority.js#matchClientIntelligence). Only AM-CONFIRMED
+// rows (confirmation_status === 'confirmed') are used -- an unconfirmed,
+// system-detected guess is not solid enough ground to build a second guess
+// (page priority) on top of.
+const PRIMARY_SERVICE_FIELD_KEY = 'primary_products_services'
+const SECONDARY_SERVICE_FIELD_KEY = 'secondary_products_services'
+const GEOGRAPHY_FIELD_KEY = 'primary_geography_markets'
+
+// TIER_LABELS / TIER_TONE -- display-only presentation for
+// lib/schemaPagePriority.js's PRIORITY_TIERS.
+const TIER_LABELS = {
+  CORE: 'Core',
+  COMMERCIAL: 'Commercial',
+  PROOF: 'Proof',
+  CONTENT: 'Content',
+  LOW_PRIORITY: 'Low priority',
+  OTHER: 'Other'
+}
+const TIER_TONE = {
+  CORE: 'good',
+  COMMERCIAL: 'good',
+  PROOF: 'caution',
+  CONTENT: 'caution',
+  LOW_PRIORITY: 'muted',
+  OTHER: 'muted'
+}
+
+// PageRow -- shared row renderer for both the Recommended and All Pages
+// lists. Two explicit, independent states, per this phase's product
+// direction: OPEN (this row is the one currently being viewed -- click the
+// row body) and QUEUED (an AM has intentionally added it to schema work --
+// the checkbox, never inferred from "open"). A page can be open without
+// being queued, queued without being open, both, or neither -- the UI
+// never collapses these into one ambiguous highlight.
+function PageRow({ dossier, isOpen, isQueued, onOpen, onToggleQueue, showRecommendedBadge, homeChecksPassing, homeChecksTotal }) {
+  const isHome = dossier.type === 'Home'
+  const statusTone = isHome ? (homeChecksPassing >= homeChecksTotal * 0.85 ? 'good' : 'bad') : 'muted'
+  const statusText = isHome ? `Analyzed — ${homeChecksPassing} / ${homeChecksTotal} checks` : 'Not analyzed yet'
+
+  return (
+    <div className={`page-row${isOpen ? ' selected' : ''}`} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr auto', alignItems: 'center', gap: 10 }}>
+      <input
+        type="checkbox"
+        checked={isQueued}
+        onChange={() => onToggleQueue(dossier.path)}
+        aria-label={isQueued ? `Remove ${dossier.path} from schema work` : `Add ${dossier.path} to schema work`}
+        title={isQueued ? 'Queued for schema work -- click to remove' : 'Add to schema work'}
+      />
+      <span className="type-badge" title={dossier.reasons.map(r => r.text).join(' · ')} style={{ cursor: 'default' }}>
+        {dossier.type}
+      </span>
+      <span
+        className="path"
+        onClick={() => onOpen(dossier.path)}
+        style={{ cursor: 'pointer', textDecoration: isOpen ? 'underline' : 'none' }}
+      >
+        {dossier.path}
+        {showRecommendedBadge && <span className="text-tiny text-muted" style={{ marginLeft: 8 }}>&#9733; Recommended</span>}
+        {isQueued && <span className="text-tiny text-muted" style={{ marginLeft: 8 }}>Queued</span>}
+      </span>
+      <span className={`status ${statusTone}`}>{statusText}</span>
+    </div>
+  )
+}
+
 export default function SchemaWizard({ pillar, clientId, client }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
   const pills = pillar ? schemaStatPills(pillar) : []
+
+  // -------------------------------------------------------------------
+  // Phase A page-selection state (2026-09-02) -- see this file's header
+  // for why this is plain React state, not durable storage, in this phase.
+  // -------------------------------------------------------------------
+  const [clientProfile, setClientProfile] = useState({ primaryServices: [], secondaryServices: [], geographies: [] })
+  const [openPath, setOpenPath] = useState(null)
+  const [queuedPaths, setQueuedPaths] = useState(() => new Set())
+  const [pageSearch, setPageSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('All')
+  const [tierFilter, setTierFilter] = useState('All')
+
+  // Best-effort fetch of this client's AM-CONFIRMED profile fields (reuses
+  // the existing GET /api/clients/[id]/profile-fields route -- no new
+  // Supabase code, no new route, nothing added to what already exists).
+  // Only 'confirmed' rows are used as client-intelligence matching signal
+  // (see lib/schemaPagePriority.js's own header on why "likely," never
+  // "confirmed page identity"). A failed/empty fetch just means
+  // prioritization runs with zero client-intelligence matches -- it never
+  // blocks the page list itself from rendering.
+  useEffect(() => {
+    let cancelled = false
+    async function loadClientProfile() {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/profile-fields`)
+        if (!res.ok) return
+        const body = await res.json()
+        const rows = Array.isArray(body.fields) ? body.fields : []
+        if (cancelled) return
+        const confirmedValues = fieldKey => rows
+          .filter(r => r.field_key === fieldKey && r.confirmation_status === 'confirmed' && r.value)
+          .map(r => r.value)
+        setClientProfile({
+          primaryServices: confirmedValues(PRIMARY_SERVICE_FIELD_KEY),
+          secondaryServices: confirmedValues(SECONDARY_SERVICE_FIELD_KEY),
+          geographies: confirmedValues(GEOGRAPHY_FIELD_KEY)
+        })
+      } catch (e) {
+        // Best-effort -- see comment above.
+      }
+    }
+    if (clientId) loadClientProfile()
+    return () => { cancelled = true }
+  }, [clientId])
+
+  const realPages = Array.isArray(pillar?.raw?.sitemapPages) ? pillar.raw.sitemapPages : null
+  const candidatePages = useMemo(() => (
+    realPages && realPages.length > 0
+      ? realPages
+      : [{ path: '/', type: 'Home', sourceSitemap: null, classificationSource: 'url_pattern', classificationConfidence: 'high', classificationReason: 'This is the homepage.' }]
+  ), [realPages])
+
+  const { recommended, all } = useMemo(
+    () => computeRecommendedSet(candidatePages, clientProfile),
+    [candidatePages, clientProfile]
+  )
+
+  const recommendedPaths = useMemo(() => new Set(recommended.map(d => d.path)), [recommended])
+
+  const filteredAll = useMemo(() => {
+    const term = pageSearch.trim().toLowerCase()
+    return all.filter(d => {
+      if (typeFilter !== 'All' && d.type !== typeFilter) return false
+      if (tierFilter !== 'All' && d.tier !== tierFilter) return false
+      if (term && !d.path.toLowerCase().includes(term)) return false
+      return true
+    })
+  }, [all, pageSearch, typeFilter, tierFilter])
+
+  const effectiveOpenPath = resolveOpenPath({ openPath, recommended, candidatePages })
+  const openDossier = all.find(d => d.path === effectiveOpenPath) || null
+
+  function toggleQueued(path) {
+    setQueuedPaths(prev => toggleQueuedPath(prev, path))
+  }
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
@@ -296,31 +469,102 @@ export default function SchemaWizard({ pillar, clientId, client }) {
       {step === 2 && (
         <div>
           {pillar ? (() => {
-            const realPages = Array.isArray(pillar.raw?.sitemapPages) ? pillar.raw.sitemapPages : null
             const homeChecksPassing = (pillar.checks || []).filter(c => c.status === 'pass').length
             const homeChecksTotal = (pillar.checks || []).length || 7
-            const rows = realPages && realPages.length > 0
-              ? realPages
-              : [{ path: '/', type: 'Home' }]
+            const rowProps = dossier => ({
+              key: dossier.path,
+              dossier,
+              isOpen: dossier.path === effectiveOpenPath,
+              isQueued: queuedPaths.has(dossier.path),
+              onOpen: setOpenPath,
+              onToggleQueue: toggleQueued,
+              homeChecksPassing,
+              homeChecksTotal
+            })
             return (
-              <div className="card" style={{ padding: 18 }}>
-                <div className="grade-title" style={{ marginBottom: 2 }}>Not every page needs the same schema</div>
-                <div className="grade-sub" style={{ marginBottom: 14 }}>
-                  Pages below are real page URLs discovered from this client&rsquo;s sitemap hierarchy (child sitemaps are followed automatically when the root sitemap is an index -- sitemap XML files themselves never appear here). Only the homepage is actually run through the Schema &amp; Structure checker&rsquo;s 7 checks today -- every other real page is listed by its real URL and page type, honestly marked &ldquo;Not scored yet&rdquo; rather than a guessed pass/fail, since per-page schema scoring beyond the homepage isn&rsquo;t built yet.
-                </div>
-                {rows.map((p, i) => (
-                  <div key={p.path} className={`page-row${i === 0 ? ' selected' : ''}`}>
-                    <span className="type-badge">{p.type}</span>
-                    <span className="path">{p.path}</span>
-                    <span className={`status ${p.type === 'Home' ? (homeChecksPassing >= homeChecksTotal * 0.85 ? 'good' : 'bad') : 'muted'}`}>
-                      {p.type === 'Home' ? `${homeChecksPassing} / ${homeChecksTotal} checks` : 'Not scored yet'}
-                    </span>
+              <div>
+                <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+                  <div className="grade-title" style={{ marginBottom: 2 }}>Not every page needs the same schema</div>
+                  <div className="grade-sub" style={{ marginBottom: 10 }}>
+                    Pages below are real page URLs discovered from this client&rsquo;s sitemap hierarchy (child sitemaps are followed automatically when the root sitemap is an index -- sitemap XML files themselves never appear here). Recommended pages are the ones most likely worth schema work first, based on page type and (where available) this client&rsquo;s AM-confirmed primary/secondary services and geography -- hover a page&rsquo;s type badge to see exactly why it landed where it did. Only the homepage is actually run through the Schema &amp; Structure checker&rsquo;s 7 checks today; every other page is honestly marked &ldquo;Not analyzed yet&rdquo; rather than a guessed result.
                   </div>
-                ))}
-                {!realPages && (
-                  <p className="text-tiny text-muted" style={{ marginTop: 10 }}>
-                    This run predates the real sitemap page list, or the sitemap fetch failed -- re-run the audit to see this client&rsquo;s actual pages here.
-                  </p>
+                  <div className="text-tiny text-muted">
+                    {queuedPaths.size} page{queuedPaths.size === 1 ? '' : 's'} queued for schema work &mdash; kept only in this browser session (clears on refresh or a new audit run; durable tracking is a later phase).
+                  </div>
+                </div>
+
+                <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Recommended for schema review ({recommended.length})</div>
+                  {recommended.length === 0 && (
+                    <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>No pages met the bar for recommendation this run -- see All discovered pages below.</p>
+                  )}
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {recommended.map(dossier => <PageRow {...rowProps(dossier)} showRecommendedBadge={false} />)}
+                  </div>
+                </div>
+
+                <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>All discovered pages ({all.length}{realPages && realPages.length >= 150 ? '+' : ''})</div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                    <input
+                      type="text"
+                      placeholder="Search by path..."
+                      value={pageSearch}
+                      onChange={e => setPageSearch(e.target.value)}
+                      style={{ flex: '1 1 200px' }}
+                    />
+                    <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
+                      <option value="All">All page types</option>
+                      {PAGE_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
+                      <option value="All">All priority tiers</option>
+                      {PRIORITY_TIER_OPTIONS.map(t => <option key={t} value={t}>{TIER_LABELS[t]}</option>)}
+                    </select>
+                  </div>
+                  {filteredAll.length === 0 ? (
+                    <p className="text-tiny text-muted">No discovered pages match this filter.</p>
+                  ) : (
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      {filteredAll.map(dossier => (
+                        <PageRow {...rowProps(dossier)} showRecommendedBadge={recommendedPaths.has(dossier.path)} />
+                      ))}
+                    </div>
+                  )}
+                  {!realPages && (
+                    <p className="text-tiny text-muted" style={{ marginTop: 10 }}>
+                      This run predates the real sitemap page list, or the sitemap fetch failed -- re-run the audit to see this client&rsquo;s actual pages here.
+                    </p>
+                  )}
+                </div>
+
+                {openDossier && (
+                  <div className="card" style={{ padding: 18 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+                      Open page: {openDossier.path}
+                      <span className={`text-tiny tier-badge ${TIER_TONE[openDossier.tier]}`} style={{ marginLeft: 8 }}>
+                        {TIER_LABELS[openDossier.tier]} tier
+                      </span>
+                    </div>
+                    <ul className="text-tiny text-muted" style={{ margin: '0 0 10px', paddingLeft: 18 }}>
+                      {openDossier.reasons.map((r, i) => <li key={i}>{r.text}</li>)}
+                    </ul>
+                    {openDossier.type === 'Home' ? (
+                      <p className="text-tiny text-muted" style={{ margin: '0 0 10px' }}>
+                        This page has already been analyzed -- see &ldquo;What&rsquo;s missing&rdquo; for its real schema checks.
+                      </p>
+                    ) : (
+                      <p className="text-tiny text-muted" style={{ margin: '0 0 10px' }}>
+                        Page-level analysis isn&rsquo;t built yet -- that&rsquo;s the next workflow step, not something this screen fakes. For now, use the checkbox or the button below to add this page to the schema work queue.
+                      </p>
+                    )}
+                    <button
+                      className={queuedPaths.has(openDossier.path) ? 'btn btn-secondary' : 'btn btn-primary'}
+                      onClick={() => toggleQueued(openDossier.path)}
+                    >
+                      {queuedPaths.has(openDossier.path) ? 'Remove from schema work' : 'Add to schema work'}
+                    </button>
+                  </div>
                 )}
               </div>
             )
@@ -331,7 +575,13 @@ export default function SchemaWizard({ pillar, clientId, client }) {
           )}
           <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(1)}>&larr; Back</button>
-            <button className="btn btn-primary" onClick={() => setStep(3)}>See gaps for selected page &rarr;</button>
+            {effectiveOpenPath === '/' ? (
+              <button className="btn btn-primary" onClick={() => setStep(3)}>See gaps for the homepage &rarr;</button>
+            ) : (
+              <button className="btn btn-secondary" disabled title="Page-level analysis isn't built yet -- use Add to schema work instead.">
+                Page-level gaps &mdash; not built yet
+              </button>
+            )}
           </div>
         </div>
       )}

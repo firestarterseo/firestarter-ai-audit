@@ -748,6 +748,16 @@ p, span, div, label, input, select, textarea, button {
 .page-row .status.bad { color: var(--grade-f); }
 .page-row .status.muted { color: var(--muted); font-weight: 600; }
 
+/* tier-badge -- Phase A page-priority tier label (2026-09-02), used outside
+   .page-row (the "Open page" detail panel) so it can't reuse the
+   .page-row-scoped .status rules above. Same tone palette/weight. */
+.tier-badge { font-size: 11.5px; font-weight: 700; }
+.tier-badge.good { color: var(--grade-a); }
+.tier-badge.caution { color: var(--grade-c); }
+.tier-badge.gap { color: var(--grade-d); }
+.tier-badge.bad { color: var(--grade-f); }
+.tier-badge.muted { color: var(--muted); font-weight: 600; }
+
 /* ---------- Callout / footer note ---------- */
 
 .callout { background: var(--white); border: 1px solid var(--border); border-left: 3px solid var(--muted-2); border-radius: var(--radius-sm); padding: 12px 14px; font-size: 12.5px; color: var(--muted); margin: 20px 0; line-height: 1.6; }
