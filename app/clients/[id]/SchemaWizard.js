@@ -14,7 +14,10 @@ import { toggleQueuedPath, resolveOpenPath } from '../../../lib/schemaPageSelect
 // server-fetch module with no reason to ship to the browser bundle) just
 // to get one small display-filter list -- not worth it for a filter
 // dropdown's option set.
-const PAGE_TYPE_OPTIONS = ['Home', 'Service', 'Location', 'Article', 'Case Study', 'About', 'Contact', 'Utility/Legal', 'Other']
+// 'Product' / 'Landing Page' added 2026-09-02, kept in sync with
+// lib/sitemapDiscovery.js's PAGE_TYPES (the sitemap-provenance
+// classification fix -- see that file's ROOT CAUSE #3).
+const PAGE_TYPE_OPTIONS = ['Home', 'Service', 'Location', 'Article', 'Case Study', 'Product', 'Landing Page', 'About', 'Contact', 'Utility/Legal', 'Other']
 const PRIORITY_TIER_OPTIONS = ['CORE', 'COMMERCIAL', 'PROOF', 'CONTENT', 'LOW_PRIORITY', 'OTHER']
 
 // Schema & Structure's wizard-style pillar detail (Phase 3 of the mockup ->
