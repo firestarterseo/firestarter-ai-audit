@@ -12,8 +12,7 @@ const { buildPageSearchFootprint, UNMATCHED_REASONS } = require('../../../../lib
 // AHREFS_API_KEY + SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY and real network
 // access to api.ahrefs.com. This project's owner does not run a local dev
 // environment with those credentials -- Vercel Production/Preview already
-// has them, so this route runs the exact same validation server-side there,
-// gated behind a shared secret so it isn't publicly triggerable.
+// has them, so this route runs the exact same validation server-side there.
 //
 // READ-ONLY / SIDE-EFFECT-FREE, same discipline as the ONEOFF validation
 // script this route mirrors (ONEOFF-validate-page-search-footprint.js,
@@ -28,11 +27,13 @@ const { buildPageSearchFootprint, UNMATCHED_REASONS } = require('../../../../lib
 // Does not write to Supabase, call runAudit(), touch SchemaWizard/
 // schemaPagePriority/opportunity logic, or create any new product behavior.
 //
-// AUTH: requires `Authorization: Bearer <PAGE_SEARCH_FOOTPRINT_VALIDATION_SECRET>`
-// -- add PAGE_SEARCH_FOOTPRINT_VALIDATION_SECRET as a Vercel env var
-// (Production) yourself, the same way AHREFS_API_KEY is already set; this
-// route never invents or logs a value for it. If the env var is unset,
-// this route refuses every request (fails closed, not open).
+// NO AUTH GATE (deliberate, by explicit owner request): this route is
+// UNPROTECTED on the public production domain. Anyone who finds this exact
+// URL can trigger it -- each hit calls the real, paid Ahrefs API and
+// returns real client ranking data in the JSON response. This is meant to
+// exist for MINUTES, not days: run the validation once, capture the
+// output, then delete this file (and this directory) in a follow-up
+// commit immediately after. Do not leave this deployed.
 //
 // USAGE: GET /api/debug/page-search-footprint-validation
 //        GET /api/debug/page-search-footprint-validation?client=<domainOrIdOrUrlFragment>
@@ -51,15 +52,6 @@ function normalizeUrl(url) {
 }
 
 async function GET(request) {
-  const requiredSecret = process.env.PAGE_SEARCH_FOOTPRINT_VALIDATION_SECRET
-  if (!requiredSecret) {
-    return Response.json({ error: 'PAGE_SEARCH_FOOTPRINT_VALIDATION_SECRET is not set on this environment -- refusing (fail closed).' }, { status: 503 })
-  }
-  const auth = request.headers.get('authorization')
-  if (auth !== `Bearer ${requiredSecret}`) {
-    return Response.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
   try {
     const apiKey = process.env.AHREFS_API_KEY
     if (!apiKey) {
