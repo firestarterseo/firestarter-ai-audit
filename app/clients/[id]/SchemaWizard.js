@@ -15,9 +15,8 @@ import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 // 2026-08-17 correction: step 2 ("Page coverage") and step 3 ("What's
 // missing") were BOTH rendered as a single blanket "not built" placeholder
 // before this. That was only half right. lib/checkers/checker.js's
-// checkSchemaAndStructure() takes one URL and only ever scores the
-// homepage -- so per-OTHER-page classification (step 2's multi-row list in
-// the mockup) genuinely isn't real yet, and stays an honest placeholder.
+// checkSchemaAndStructure() takes one URL and only ever SCORES the
+// homepage -- so per-other-page schema scoring genuinely isn't real yet.
 // But step 3's "What's missing" content, for the one real page this
 // checker DOES score, is entirely real: the mockup's own "7 checks, but
 // really just 2 kinds of fix" framing maps label-for-label onto this
@@ -29,6 +28,16 @@ import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 // this tool doesn't write. That grouping was sitting in already-persisted
 // data the whole time; treating it as "not built" was brushing over real
 // work the mockup got right, not an honest gap.
+//
+// 2026-09-02 sitemap/page-discovery fix: step 2's page list used to include
+// child sitemap XML files (e.g. /post-sitemap.xml) whenever a client's root
+// sitemap was an index -- lib/checkers/checker.js was treating a sitemap
+// index's own <loc> entries (child sitemap references) as if they were
+// pages. That's fixed at the source (see lib/sitemapDiscovery.js); every
+// row this step renders is now a real, classified page URL. Per-page
+// SCHEMA SCORING beyond the homepage is still not built -- that's the
+// "Not scored yet" status below, a different thing from page-type
+// classification (which every row now gets for real).
 
 // SCHEMA_CHECK_GROUPS -- which real check(group) it belongs to, and the
 // regex to find its matching real issue (for severity/why/recommendation)
@@ -297,14 +306,14 @@ export default function SchemaWizard({ pillar, clientId, client }) {
               <div className="card" style={{ padding: 18 }}>
                 <div className="grade-title" style={{ marginBottom: 2 }}>Not every page needs the same schema</div>
                 <div className="grade-sub" style={{ marginBottom: 14 }}>
-                  Pages below are pulled from this client&rsquo;s real sitemap.xml (already fetched for the Technical Foundation check). Only the homepage is actually run through the Schema &amp; Structure checker&rsquo;s 7 checks today -- every other real page is listed by its real URL and page type, honestly marked &ldquo;Not classified yet&rdquo; rather than a guessed pass/fail, since per-page schema scoring beyond the homepage isn&rsquo;t built yet.
+                  Pages below are real page URLs discovered from this client&rsquo;s sitemap hierarchy (child sitemaps are followed automatically when the root sitemap is an index -- sitemap XML files themselves never appear here). Only the homepage is actually run through the Schema &amp; Structure checker&rsquo;s 7 checks today -- every other real page is listed by its real URL and page type, honestly marked &ldquo;Not scored yet&rdquo; rather than a guessed pass/fail, since per-page schema scoring beyond the homepage isn&rsquo;t built yet.
                 </div>
                 {rows.map((p, i) => (
                   <div key={p.path} className={`page-row${i === 0 ? ' selected' : ''}`}>
                     <span className="type-badge">{p.type}</span>
                     <span className="path">{p.path}</span>
                     <span className={`status ${p.type === 'Home' ? (homeChecksPassing >= homeChecksTotal * 0.85 ? 'good' : 'bad') : 'muted'}`}>
-                      {p.type === 'Home' ? `${homeChecksPassing} / ${homeChecksTotal} checks` : 'Not classified yet'}
+                      {p.type === 'Home' ? `${homeChecksPassing} / ${homeChecksTotal} checks` : 'Not scored yet'}
                     </span>
                   </div>
                 ))}
