@@ -34,19 +34,12 @@ const PAGE_STATE_TONE = {
   COMPLETED: 'good'
 }
 
-// PAGE_TYPE_OPTIONS / PRIORITY_TIER_OPTIONS -- literal duplicates of the
-// canonical lists in lib/sitemapDiscovery.js / lib/schemaPagePriority.js
-// (same "small, pure list, not worth a cross-module dependency for"
-// reasoning this file already uses for gradeClass below). Kept separate
-// deliberately: lib/sitemapDiscovery.js pulls in lib/webPageFetch.js (a
-// server-fetch module with no reason to ship to the browser bundle) just
-// to get one small display-filter list -- not worth it for a filter
-// dropdown's option set.
-// 'Product' / 'Landing Page' added 2026-09-02, kept in sync with
-// lib/sitemapDiscovery.js's PAGE_TYPES (the sitemap-provenance
-// classification fix -- see that file's ROOT CAUSE #3).
-const PAGE_TYPE_OPTIONS = ['Home', 'Service', 'Location', 'Article', 'Case Study', 'Product', 'Landing Page', 'About', 'Contact', 'Utility/Legal', 'Other']
-const PRIORITY_TIER_OPTIONS = ['CORE', 'COMMERCIAL', 'PROOF', 'CONTENT', 'LOW_PRIORITY', 'OTHER']
+// PAGE_TYPE_OPTIONS / PRIORITY_TIER_OPTIONS (the "All discovered pages"
+// filter dropdowns' option sets) were removed 2026-09-02 along with that
+// section itself -- see PRODUCT DECISION #1's correction pass below. If a
+// deliberate "search/add another page" affordance is designed later, these
+// lists (lib/sitemapDiscovery.js's PAGE_TYPES / lib/schemaPagePriority.js's
+// PRIORITY_TIERS) are still the canonical source to duplicate from.
 
 // Schema & Structure's wizard-style pillar detail (Phase 3 of the mockup ->
 // production sync -- see workflow-mockup.html's #pane-schema for the design
@@ -343,11 +336,6 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   const [clientProfile, setClientProfile] = useState({ primaryServices: [], secondaryServices: [], geographies: [] })
   const [openPath, setOpenPath] = useState(null)
   const [queuedPaths, setQueuedPaths] = useState(() => new Set())
-  const [pageSearch, setPageSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState('All')
-  const [tierFilter, setTierFilter] = useState('All')
-  const [showAllPages, setShowAllPages] = useState(false)
-
   // -------------------------------------------------------------------
   // Phase B page-analysis state (2026-09-02) -- see lib/pageAnalysis.js and
   // lib/schemaPageLifecycle.js's headers for why this is real fetched
@@ -399,6 +387,26 @@ export default function SchemaWizard({ pillar, clientId, client }) {
       : [{ path: '/', type: 'Home', sourceSitemap: null, classificationSource: 'url_pattern', classificationConfidence: 'high', classificationReason: 'This is the homepage.' }]
   ), [realPages])
 
+  // homepagePath -- 2026-09-02 CORRECTION: the live validation found the
+  // homepage still showing up Recommended despite 7/7 checks passing. ROOT
+  // CAUSE (traced, not patched cosmetically): pageStates below used to
+  // hardcode the literal string '/' as "the homepage's path" instead of
+  // asking the actual discovered/classified data what the homepage's real
+  // path is. That is exactly the class of bug this codebase's other
+  // modules go out of their way to avoid (see lib/sitemapDiscovery.js's own
+  // sourceSitemap-tracking discipline) -- two independent places computing
+  // "which page is the homepage" can silently disagree. This now derives
+  // the homepage's path from the SAME candidatePages array
+  // computeRecommendedSet consumes, by its real classification
+  // (`type === 'Home'`, set once, authoritatively, by
+  // lib/sitemapDiscovery.js's classifyPage / this file's own fallback
+  // default) -- never a second, independent assumption about what that
+  // path string looks like. A mismatch between "the page pageStates marks
+  // resolved" and "the page computeRecommendedSet is asked to exclude" is
+  // now structurally impossible: both read `dossier.path`/`page.path` off
+  // the identical entry.
+  const homepageEntry = useMemo(() => candidatePages.find(p => p.type === 'Home') || null, [candidatePages])
+
   // pageStates -- every page's real lib/schemaPageLifecycle.js state,
   // derived fresh on every render from its two real sources: the
   // homepage's existing 7-check pillar result (PRODUCT DECISION #12), and
@@ -409,16 +417,16 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   // right now, never a stale copy.
   const pageStates = useMemo(() => {
     const states = new Map()
-    if (pillar) {
+    if (pillar && homepageEntry) {
       const checksPassing = (pillar.checks || []).filter(c => c.status === 'pass').length
       const checksTotal = (pillar.checks || []).length || 7
-      states.set('/', deriveHomepageState({ checksPassing, checksTotal }))
+      states.set(homepageEntry.path, deriveHomepageState({ checksPassing, checksTotal }))
     }
     for (const [path, analysis] of pageAnalyses.entries()) {
       states.set(path, deriveStateFromAnalysis(analysis))
     }
     return states
-  }, [pillar, pageAnalyses])
+  }, [pillar, homepageEntry, pageAnalyses])
 
   // excludePaths -- PRODUCT DECISION #3 / #11: a page in a resolved state
   // (today: NO_ACTION_NEEDED -- see lib/schemaPageLifecycle.js) never
@@ -432,20 +440,11 @@ export default function SchemaWizard({ pillar, clientId, client }) {
     [candidatePages, clientProfile, excludePaths]
   )
 
-  const recommendedPaths = useMemo(() => new Set(recommended.map(d => d.path)), [recommended])
-
-  const filteredAll = useMemo(() => {
-    const term = pageSearch.trim().toLowerCase()
-    return all.filter(d => {
-      if (typeFilter !== 'All' && d.type !== typeFilter) return false
-      if (tierFilter !== 'All' && d.tier !== tierFilter) return false
-      if (term && !d.path.toLowerCase().includes(term)) return false
-      return true
-    })
-  }, [all, pageSearch, typeFilter, tierFilter])
-
   const effectiveOpenPath = resolveOpenPath({ openPath, recommended, candidatePages })
   const openDossier = all.find(d => d.path === effectiveOpenPath) || null
+  // isHomeOpen -- same fix as homepageEntry above: compares against the
+  // homepage's REAL discovered path, never a hardcoded '/' literal.
+  const isHomeOpen = !!homepageEntry && effectiveOpenPath === homepageEntry.path
 
   function toggleQueued(path) {
     setQueuedPaths(prev => toggleQueuedPath(prev, path))
@@ -662,46 +661,17 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                   </div>
                 )}
 
-                <div className="card" style={{ padding: 18, marginBottom: 14 }}>
-                  <button className="btn btn-secondary" onClick={() => setShowAllPages(v => !v)}>
-                    {showAllPages ? 'Hide all discovered pages' : `View all discovered pages (${all.length}${realPages && realPages.length >= 150 ? '+' : ''})`}
-                  </button>
-                  {showAllPages && (
-                    <div style={{ marginTop: 14 }}>
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                        <input
-                          type="text"
-                          placeholder="Search by path..."
-                          value={pageSearch}
-                          onChange={e => setPageSearch(e.target.value)}
-                          style={{ flex: '1 1 200px' }}
-                        />
-                        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
-                          <option value="All">All page types</option>
-                          {PAGE_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-                        </select>
-                        <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
-                          <option value="All">All priority tiers</option>
-                          {PRIORITY_TIER_OPTIONS.map(t => <option key={t} value={t}>{TIER_LABELS[t]}</option>)}
-                        </select>
-                      </div>
-                      {filteredAll.length === 0 ? (
-                        <p className="text-tiny text-muted">No discovered pages match this filter.</p>
-                      ) : (
-                        <div style={{ display: 'grid', gap: 6 }}>
-                          {filteredAll.map(dossier => (
-                            <PageRow {...rowProps(dossier)} showRecommendedBadge={recommendedPaths.has(dossier.path)} />
-                          ))}
-                        </div>
-                      )}
-                      {!realPages && (
-                        <p className="text-tiny text-muted" style={{ marginTop: 10 }}>
-                          This run predates the real sitemap page list, or the sitemap fetch failed -- re-run the audit to see this client&rsquo;s actual pages here.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
+                {/* PRODUCT DECISION #1 (2026-09-02 correction pass): "All
+                    discovered pages" is REMOVED from the normal workflow --
+                    not merely collapsed behind a toggle, which the live
+                    validation showed was not good enough (an AM should
+                    never be handed 282 URLs to browse). The full discovered
+                    universe (`all`, from computeRecommendedSet) still feeds
+                    classification, prioritization, and the recommendation
+                    batch/advancement logic below -- it is simply no longer
+                    rendered as a browsable list. If "search/add another
+                    page" is needed later, that is an intentional, separate
+                    design decision, not a re-add of this section. */}
 
                 {openDossier && (
                   <div className="card" style={{ padding: 18 }}>
@@ -716,7 +686,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                     </ul>
                     {openDossier.type === 'Home' ? (
                       <p className="text-tiny text-muted" style={{ margin: '0 0 10px' }}>
-                        {getPageState(pageStates, '/') === 'NO_ACTION_NEEDED'
+                        {getPageState(pageStates, openDossier.path) === 'NO_ACTION_NEEDED'
                           ? 'This page has already been analyzed and has no actionable schema gap -- no action needed.'
                           : 'This page has already been analyzed -- see “What’s missing” for its real schema checks.'}
                       </p>
@@ -761,7 +731,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
           )}
           <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(1)}>&larr; Back</button>
-            {effectiveOpenPath === '/' ? (
+            {isHomeOpen ? (
               <button className="btn btn-primary" onClick={() => setStep(3)}>See gaps for the homepage &rarr;</button>
             ) : (() => {
               // PRODUCT DECISION #7: this button is now genuinely contextual
@@ -792,7 +762,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
 
       {step === 3 && (
         <div>
-          {effectiveOpenPath !== '/' ? (() => {
+          {!isHomeOpen ? (() => {
             // PRODUCT DECISION #9/#10: a non-homepage page's "What's
             // missing" is the real, page-type-dispatched analysis-result
             // contract from lib/pageAnalysis.js -- CURRENT SCHEMA /
@@ -922,7 +892,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
           )}
           <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(2)}>&larr; Pick a different page</button>
-            {effectiveOpenPath === '/' ? (
+            {isHomeOpen ? (
               <button className="btn btn-primary" onClick={() => setStep(4)}>Fix with the generator &rarr;</button>
             ) : (
               // PRODUCT DECISION #10: "Do not create a Phase 3 opportunity
