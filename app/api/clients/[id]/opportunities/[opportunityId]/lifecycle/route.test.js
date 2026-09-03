@@ -79,7 +79,8 @@ const spies = {
   recordHandoff: makeSpy(),
   recordHumanCompleted: makeSpy(),
   requestVerification: makeSpy(),
-  recordVerification: makeSpy()
+  recordVerification: makeSpy(),
+  prepareWork: makeSpy()
 }
 
 require.cache[supabaseServerPath] = {
@@ -120,7 +121,8 @@ async function testEachActionDispatchesTheRightFunctionOnly() {
     { action: 'request_handoff', body: { action: 'request_handoff', instructions: 'go' }, spy: 'requestHandoff' },
     { action: 'record_handoff', body: { action: 'record_handoff', method: 'manual', reference: 'ref-1' }, spy: 'recordHandoff' },
     { action: 'record_human_completed', body: { action: 'record_human_completed', notes: 'done' }, spy: 'recordHumanCompleted' },
-    { action: 'record_verification', body: { action: 'record_verification', result: 'verified', evidence: [] }, spy: 'recordVerification' }
+    { action: 'record_verification', body: { action: 'record_verification', result: 'verified', evidence: [] }, spy: 'recordVerification' },
+    { action: 'prepare_edited_version', body: { action: 'prepare_edited_version', artifactType: 'schema_jsonld', payload: { add: [] }, previousVersionId: 'pw-1' }, spy: 'prepareWork' }
   ]
   for (const c of cases) {
     resetAll()
@@ -130,7 +132,15 @@ async function testEachActionDispatchesTheRightFunctionOnly() {
     for (const [name, spy] of Object.entries(spies)) {
       if (name === c.spy) {
         assert.strictEqual(spy.calls.length, 1, `${c.action}: expected ${c.spy} to be called once`)
-        assert.strictEqual(spy.calls[0][0], 'opp-1', `${c.action}: expected ${c.spy} called with opportunityId`)
+        // prepareWork's real signature is ONE options object carrying
+        // opportunityId as a field, unlike every other lifecycle function
+        // here's (opportunityId, options) two-arg shape -- see
+        // testActionPayloadsMapCorrectly's own note on this.
+        if (c.spy === 'prepareWork') {
+          assert.strictEqual(spy.calls[0][0].opportunityId, 'opp-1', `${c.action}: expected ${c.spy} called with opportunityId`)
+        } else {
+          assert.strictEqual(spy.calls[0][0], 'opp-1', `${c.action}: expected ${c.spy} called with opportunityId`)
+        }
       } else {
         assert.strictEqual(spy.calls.length, 0, `${c.action}: expected ${name} NOT to be called`)
       }
@@ -160,6 +170,24 @@ async function testActionPayloadsMapCorrectly() {
   await POST(req({ action: 'edit_then_approve', preparedWorkId: 'pw-42', notes: 'Tightened the pitch copy.' }), ctx())
   assert.deepStrictEqual(spies.approveOpportunity.calls[0][1], { preparedWorkId: 'pw-42', edited: true, notes: 'Tightened the pitch copy.', actor: 'am' })
 
+  resetAll()
+  await POST(req({ action: 'prepare_edited_version', artifactType: 'schema_jsonld', payload: { add: [{ description: 'x', node: { '@type': 'AboutPage' } }] }, previousVersionId: 'pw-7', evidenceContext: [{ text: 'edited by AM' }] }), ctx())
+  // prepareWork's real signature (lib/opportunityLifecycle.js) takes ONE
+  // options object (opportunityId included in it), unlike the two-arg
+  // (opportunityId, options) shape every other lifecycle function here
+  // uses -- so this assertion checks calls[0][0], not calls[0][1].
+  assert.deepStrictEqual(spies.prepareWork.calls[0][0], {
+    opportunityId: 'opp-1',
+    artifactType: 'schema_jsonld',
+    payload: { add: [{ description: 'x', node: { '@type': 'AboutPage' } }] },
+    generationMethod: 'system_generated',
+    evidenceContext: [{ text: 'edited by AM' }],
+    supportsAutomatedExecution: false,
+    createdBy: 'am',
+    previousVersionId: 'pw-7',
+    actor: 'am'
+  })
+
   log('TEST (action payloads map onto the exact lifecycle-function argument shapes SourceCitationWizard.js sends) PASSED')
 }
 
@@ -186,6 +214,21 @@ async function testRequiredPayloadValidation() {
   res = await POST(req({ action: 'edit_then_approve', notes: 'no preparedWorkId supplied' }), ctx())
   assert.strictEqual(res.status, 400)
   assert.strictEqual(spies.approveOpportunity.calls.length, 0, 'edit_then_approve must never call approveOpportunity without a preparedWorkId -- that would fabricate an "edited" claim for no real edit')
+
+  resetAll()
+  res = await POST(req({ action: 'prepare_edited_version', payload: {}, previousVersionId: 'pw-1' }), ctx())
+  assert.strictEqual(res.status, 400)
+  assert.strictEqual(spies.prepareWork.calls.length, 0, 'prepare_edited_version requires artifactType')
+
+  resetAll()
+  res = await POST(req({ action: 'prepare_edited_version', artifactType: 'schema_jsonld', previousVersionId: 'pw-1' }), ctx())
+  assert.strictEqual(res.status, 400)
+  assert.strictEqual(spies.prepareWork.calls.length, 0, 'prepare_edited_version requires a payload object')
+
+  resetAll()
+  res = await POST(req({ action: 'prepare_edited_version', artifactType: 'schema_jsonld', payload: { add: [] } }), ctx())
+  assert.strictEqual(res.status, 400)
+  assert.strictEqual(spies.prepareWork.calls.length, 0, 'prepare_edited_version requires previousVersionId -- an untethered "edit" must never be indistinguishable from a first-time system generation')
 
   log('TEST (missing required payload fields are rejected with 400 before the lifecycle function is ever called) PASSED')
 }

@@ -1,7 +1,7 @@
 const { getSupabaseServerClient } = require('../../../../../../../lib/supabaseServer')
 const {
   approveOpportunity, rejectOpportunity, requestHandoff, recordHandoff,
-  recordHumanCompleted, requestVerification, recordVerification
+  recordHumanCompleted, requestVerification, recordVerification, prepareWork
 } = require('../../../../../../../lib/opportunityLifecycle')
 
 // POST -- Phase 3 shared-lifecycle dispatcher for one opportunity
@@ -26,14 +26,19 @@ const {
 //
 // ACTION SET -- intentionally the exact subset SourceCitationWizard.js's
 // runLifecycleAction() calls today, plus 'edit_then_approve' (added Phase
-// 1.1, 2026-09-01 -- see below), not the full lib/opportunityLifecycle.js
-// surface. qualifyOpportunity, prepareWork, submitForApproval,
-// executeOpportunity, requestRetest and recordRetestResult are all real
-// exports with no caller anywhere in the UI yet, so they are deliberately
-// NOT exposed here -- adding them would be inventing API surface ahead of
-// any real caller. Every handler passes actor: 'am', since every one of
-// these actions only ever fires from an explicit AM button click in the
-// wizard -- never from an automated/system path -- so the
+// 1.1, 2026-09-01) and 'prepare_edited_version' (added Phase 6, 2026-09-03
+// -- see below; SchemaWizard.js's prepared-work review card is its first
+// real caller), not the full lib/opportunityLifecycle.js surface.
+// qualifyOpportunity, submitForApproval, executeOpportunity, requestRetest
+// and recordRetestResult are all real exports with no caller through THIS
+// route yet, so they are deliberately NOT exposed here -- adding them
+// would be inventing API surface ahead of any real caller (a pillar's own
+// prepare-work route, such as app/api/clients/[id]/schema/prepare-work/
+// route.js, calls qualifyOpportunity/prepareWork/submitForApproval
+// directly for its own system-generated flow; only the AM-edit path goes
+// through this shared dispatcher). Every handler passes actor: 'am', since
+// every one of these actions only ever fires from an explicit AM button
+// click in the wizard -- never from an automated/system path -- so the
 // opportunity_history ledger should reflect that honestly.
 //
 // 'edit_then_approve' (Phase 1.1): OpportunityCard.js's edited-approval
@@ -55,6 +60,22 @@ const {
 // edited_then_approved history event for content nobody edited. This
 // primitive is exposed and tested now so a future prepared-work editing
 // UI can wire straight into it without touching this route again.
+//
+// 'prepare_edited_version' (Phase 6, 2026-09-03): the future editing UI the
+// comment above anticipated -- Schema Prepared Work + AM Review is its
+// first real caller (app/clients/[id]/SchemaWizard.js's prepared-work
+// review card). Generic, not schema-specific: it is a thin pass-through to
+// lib/opportunityLifecycle.js#prepareWork() with createdBy: 'am' always
+// forced (never trusts the request body for this), so ANY pillar's AM-
+// edited prepared-work version goes through the exact same call -- a
+// system-generated regeneration is each pillar's own prepare-work route
+// calling prepareWork() directly with createdBy: 'system' (e.g.
+// app/api/clients/[id]/schema/prepare-work/route.js), never this action.
+// Requires previousVersionId (unlike prepareWork's own optional default)
+// so every edited version is durably, traceably linked to the version it
+// replaced -- an untethered "edit" with no previousVersionId would be
+// indistinguishable from a first-time system generation in the history
+// ledger.
 const ACTIONS = {
   approve: {
     // approveOpportunity() defaults preparedWorkId to null and edited to
@@ -111,6 +132,25 @@ const ACTIONS = {
     run: (opportunityId, body) => recordVerification(opportunityId, {
       result: body.result,
       evidence: Array.isArray(body.evidence) ? body.evidence : [],
+      actor: 'am'
+    })
+  },
+  prepare_edited_version: {
+    validate: (body) => {
+      if (!body.artifactType) return 'prepare_edited_version requires "artifactType".'
+      if (!body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) return 'prepare_edited_version requires a "payload" object -- the edited artifact content.'
+      if (!body.previousVersionId) return 'prepare_edited_version requires "previousVersionId" -- the prepared-work version this edit is based on.'
+      return null
+    },
+    run: (opportunityId, body) => prepareWork({
+      opportunityId,
+      artifactType: body.artifactType,
+      payload: body.payload,
+      generationMethod: 'system_generated',
+      evidenceContext: Array.isArray(body.evidenceContext) ? body.evidenceContext : [],
+      supportsAutomatedExecution: false,
+      createdBy: 'am',
+      previousVersionId: body.previousVersionId,
       actor: 'am'
     })
   }

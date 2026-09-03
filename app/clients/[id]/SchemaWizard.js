@@ -437,6 +437,159 @@ function PageAnalysisResult({ analysis }) {
   )
 }
 
+// PreparedWorkPanel -- Schema Prepared Work + AM Review (Phase 6,
+// 2026-09-03). Renders instruction #5's mockup: DIAGNOSIS is
+// PageAnalysisResult above this panel (never duplicated here); this panel
+// covers CURRENT SCHEMA / PROPOSED CHANGES (ADD/MODIFY, KEEP alongside)
+// / PREPARED JSON-LD / APPROVE / EDIT THEN APPROVE / REJECT. Purely
+// presentational plus the callbacks SchemaWizard passes in -- it never
+// calls fetch() itself.
+//
+// ELIGIBILITY (client-side mirror of lib/schemaOpportunity.js's
+// isEligibleForPreparedWork -- display-only; the prepare-work route
+// re-derives this authoritatively server-side regardless): ACTION_REQUIRED,
+// or IMPROVEMENT_AVAILABLE with a real failing Recommended check.
+// NO_ACTION_NEEDED / COULD_NOT_VERIFY never show the CTA, and this panel
+// renders nothing at all once there's neither an eligible diagnosis NOR
+// any prepared work already on file for this page.
+function isEligibleForPreparedWorkDisplay(analysis) {
+  if (!analysis || analysis.fetchState !== 'success') return false
+  if (analysis.finalStatus === 'ACTION_REQUIRED') return (analysis.coreChecks || []).some(c => c.status === 'fail')
+  if (analysis.finalStatus === 'IMPROVEMENT_AVAILABLE') return (analysis.recommendedChecks || []).some(c => c.status === 'fail')
+  return false
+}
+
+const APPROVAL_STATUS_COPY = {
+  pending: { label: 'Pending AM review', tone: 'issue-minor' },
+  approved: { label: 'Approved -- ready for execution (manual/RED)', tone: 'issue-passing' },
+  rejected: { label: 'Rejected', tone: 'issue-critical' }
+}
+
+function SchemaChangeList({ title, items, tone }) {
+  if (!items || items.length === 0) return null
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 4 }}>{title}</div>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+        {items.map((item, i) => <li key={i} style={{ marginBottom: 4 }}>{typeof item === 'string' ? item : item.description}</li>)}
+      </ul>
+    </div>
+  )
+}
+
+function PreparedWorkPanel({
+  path, analysis, prepared, isPreparing, isBusy, error, editingDraft,
+  onPrepare, onApprove, onStartEdit, onCancelEdit, onDraftChange, onSaveEdit, onReject
+}) {
+  const eligible = isEligibleForPreparedWorkDisplay(analysis)
+  const opportunity = prepared?.opportunity
+  const versions = prepared?.preparedWork || []
+  const latest = versions[0] || null
+
+  if (!eligible && !opportunity) return null
+
+  return (
+    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Schema prepared work</div>
+
+      {error && <p className="text-small issue-why" style={{ marginBottom: 8 }}>{error}</p>}
+
+      {!opportunity && eligible && (
+        <>
+          <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
+            This page&rsquo;s diagnosed gap can be prepared as real, page-specific schema for AM review -- nothing is generated or changed until you click below.
+          </p>
+          <button className="btn btn-primary" disabled={isPreparing} onClick={onPrepare}>
+            {isPreparing ? 'Preparing…' : 'Prepare schema work'}
+          </button>
+        </>
+      )}
+
+      {opportunity && latest && (
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+            {opportunity.detail?.targetProfile && <>Target profile: {opportunity.detail.targetProfile} &middot; </>}
+            Version {latest.version}{latest.created_by === 'am' ? ' (AM-edited)' : ''}
+            {latest.status === 'preparation_failed' && ' -- preparation failed'}
+          </div>
+
+          {latest.status === 'preparation_failed' ? (
+            <p className="text-small issue-why">
+              {latest.payload?.reason || 'No content-defensible schema change could be generated for this page without fabricating evidence.'}
+            </p>
+          ) : (
+            <>
+              <SchemaChangeList title="Current schema (kept unchanged)" items={latest.payload?.keep} />
+              <SchemaChangeList title="Proposed: add" items={latest.payload?.add} />
+              <SchemaChangeList title="Proposed: modify" items={latest.payload?.modify} />
+
+              {latest.payload?.canonicalEntity && !latest.payload.canonicalEntity.resolved && (
+                <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
+                  Canonical Organization @id not resolved ({latest.payload.canonicalEntity.source}) -- entity references were omitted rather than fabricated.
+                </p>
+              )}
+              {Array.isArray(latest.payload?.unresolvedDependencies) && latest.payload.unresolvedDependencies.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>Unresolved dependencies</div>
+                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--muted)' }}>
+                    {latest.payload.unresolvedDependencies.map((d, i) => <li key={i}>{d}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {editingDraft === undefined ? (
+                (latest.payload?.add?.length > 0 || latest.payload?.modify?.length > 0) && (
+                  <>
+                    <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 4 }}>Prepared JSON-LD</div>
+                    <pre style={{ background: 'var(--bg-alt)', padding: 10, borderRadius: 'var(--radius-sm)', fontSize: 12, overflowX: 'auto', marginBottom: 10 }}>
+                      {JSON.stringify({ add: latest.payload.add, modify: latest.payload.modify }, null, 2)}
+                    </pre>
+                  </>
+                )
+              ) : (
+                <>
+                  <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 4 }}>Edit prepared JSON-LD (add / modify)</div>
+                  <textarea
+                    value={editingDraft}
+                    onChange={(e) => onDraftChange(e.target.value)}
+                    rows={12}
+                    style={{ width: '100%', fontFamily: 'monospace', fontSize: 12, marginBottom: 8 }}
+                  />
+                </>
+              )}
+            </>
+          )}
+
+          {opportunity.approval_status && APPROVAL_STATUS_COPY[opportunity.approval_status] && (
+            <div style={{ margin: '4px 0 10px' }}>
+              <span className={`issue-badge ${APPROVAL_STATUS_COPY[opportunity.approval_status].tone}`}>
+                {APPROVAL_STATUS_COPY[opportunity.approval_status].label}
+              </span>
+            </div>
+          )}
+
+          {opportunity.approval_status === 'pending' && latest.status !== 'preparation_failed' && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {editingDraft === undefined ? (
+                <>
+                  <button className="btn btn-primary" disabled={isBusy} onClick={() => onApprove(latest)}>Approve</button>
+                  <button className="btn btn-secondary" disabled={isBusy} onClick={() => onStartEdit(latest.payload)}>Edit before approving</button>
+                  <button className="btn btn-secondary" disabled={isBusy} onClick={onReject}>Reject</button>
+                </>
+              ) : (
+                <>
+                  <button className="btn btn-primary" disabled={isBusy} onClick={() => onSaveEdit(latest)}>Save edited version</button>
+                  <button className="btn btn-secondary" disabled={isBusy} onClick={onCancelEdit}>Cancel edit</button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function SchemaWizard({ pillar, clientId, client }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
@@ -468,6 +621,22 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   // run, stays visible on request regardless of its NO_ACTION_NEEDED /
   // ACTIONABLE_GAP conclusion -- "DO NOT HIDE PASSING PAGES' ANALYSIS."
   const [expandedAnalysisPaths, setExpandedAnalysisPaths] = useState(() => new Set())
+
+  // -------------------------------------------------------------------
+  // Schema Prepared Work + AM Review state (Phase 6, 2026-09-03). Unlike
+  // pageAnalyses above, this IS durable server-side state -- every value
+  // here is a client-side CACHE of what app/api/clients/[id]/schema/
+  // prepare-work/route.js and the shared opportunity lifecycle route
+  // already persisted (the real opportunities/opportunity_prepared_work
+  // rows), refreshed after every prepare/approve/edit/reject call. Losing
+  // this cache (e.g. a page refresh) loses nothing real -- the GET branch
+  // of the prepare-work route re-reads it from Supabase on demand.
+  // -------------------------------------------------------------------
+  const [preparedWorkByPath, setPreparedWorkByPath] = useState(() => new Map()) // path -> { opportunity, preparedWork: [...] }
+  const [preparingPaths, setPreparingPaths] = useState(() => new Set())
+  const [lifecycleBusyPaths, setLifecycleBusyPaths] = useState(() => new Set())
+  const [preparedWorkErrors, setPreparedWorkErrors] = useState(() => new Map())
+  const [editingDrafts, setEditingDrafts] = useState(() => new Map()) // path -> draft JSON text
 
   // Best-effort fetch of this client's AM-CONFIRMED profile fields (reuses
   // the existing GET /api/clients/[id]/profile-fields route -- no new
@@ -568,6 +737,27 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   // homepage's REAL discovered path, never a hardcoded '/' literal.
   const isHomeOpen = !!homepageEntry && effectiveOpenPath === homepageEntry.path
 
+  // Best-effort, read-only load of any Schema prepared work that already
+  // exists for the currently open page (e.g. from an earlier visit this
+  // session, or another AM) -- calls the prepare-work route's GET branch
+  // ONLY (never POST: this never fetches the client's live site, never
+  // qualifies, never generates anything). Skips entirely once this path is
+  // already cached, so switching back and forth between pages never
+  // re-fetches state it already has.
+  useEffect(() => {
+    if (!effectiveOpenPath || isHomeOpen) return
+    if (preparedWorkByPath.has(effectiveOpenPath)) return
+    let cancelled = false
+    fetch(`/api/clients/${clientId}/schema/prepare-work?path=${encodeURIComponent(effectiveOpenPath)}`)
+      .then(res => (res.ok ? res.json() : null))
+      .then(body => {
+        if (cancelled || !body || !body.opportunity) return
+        setPreparedWorkByPath(prev => new Map(prev).set(effectiveOpenPath, { opportunity: body.opportunity, preparedWork: body.preparedWork || [] }))
+      })
+      .catch(() => { /* best-effort -- an AM can always click "Prepare schema work" fresh */ })
+    return () => { cancelled = true }
+  }, [effectiveOpenPath, isHomeOpen, clientId, preparedWorkByPath])
+
   function toggleQueued(path) {
     setQueuedPaths(prev => toggleQueuedPath(prev, path))
   }
@@ -623,6 +813,173 @@ export default function SchemaWizard({ pillar, clientId, client }) {
         return next
       })
     }
+  }
+
+  // clearPreparedWorkError(path) -- shared by every action below so a
+  // stale error from a previous attempt never lingers next to a
+  // successful retry's result.
+  function clearPreparedWorkError(path) {
+    setPreparedWorkErrors(prev => {
+      if (!prev.has(path)) return prev
+      const next = new Map(prev)
+      next.delete(path)
+      return next
+    })
+  }
+
+  // refreshPreparedWork(path) -- the GET branch of the prepare-work route:
+  // read-only, no live fetch, no re-qualification. Called after every
+  // approve/reject/edit_then_approve/prepare_edited_version action (which
+  // themselves go through the SHARED lifecycle route, not this one) so the
+  // AM Review card reflects the durable state those actions just wrote.
+  async function refreshPreparedWork(path) {
+    const res = await fetch(`/api/clients/${clientId}/schema/prepare-work?path=${encodeURIComponent(path)}`)
+    const body = await res.json().catch(() => null)
+    if (!res.ok || !body) return false
+    setPreparedWorkByPath(prev => new Map(prev).set(path, { opportunity: body.opportunity, preparedWork: body.preparedWork || [] }))
+    return true
+  }
+
+  // prepareSchemaWorkNow(path) -- the AM's explicit "Prepare Schema Work"
+  // click (instruction #5's CTA). Runs the full ANALYZE -> QUALIFY ->
+  // PREPARE -> SUBMIT-FOR-APPROVAL flow server-side (see
+  // app/api/clients/[id]/schema/prepare-work/route.js) -- never fires
+  // automatically, and never on a page that hasn't already been diagnosed
+  // as eligible in this UI (see PreparedWorkPanel's own eligibility gate
+  // below; the route re-checks eligibility authoritatively regardless).
+  async function prepareSchemaWorkNow(path) {
+    if (preparingPaths.has(path)) return
+    const dossier = all.find(d => d.path === path)
+    setPreparingPaths(prev => new Set(prev).add(path))
+    clearPreparedWorkError(path)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/schema/prepare-work`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path,
+          page: dossier ? {
+            type: dossier.type,
+            classificationSource: dossier.classificationSource,
+            classificationConfidence: dossier.classificationConfidence
+          } : undefined
+        })
+      })
+      const body = await res.json()
+      if (!res.ok) {
+        setPreparedWorkErrors(prev => new Map(prev).set(path, body?.error || `Request failed (HTTP ${res.status}).`))
+        return
+      }
+      setPreparedWorkByPath(prev => new Map(prev).set(path, { opportunity: body.opportunity, preparedWork: body.preparedWork || [] }))
+      // The route re-diagnosed this page live to establish eligibility --
+      // fold that fresh diagnosis back into pageAnalyses so the "What's
+      // missing" view never shows a diagnosis older than the prepared
+      // work it's sitting next to.
+      if (body.analysis) setPageAnalyses(prev => new Map(prev).set(path, body.analysis))
+    } catch (e) {
+      setPreparedWorkErrors(prev => new Map(prev).set(path, 'Could not reach the server to prepare schema work.'))
+    } finally {
+      setPreparingPaths(prev => {
+        const next = new Set(prev)
+        next.delete(path)
+        return next
+      })
+    }
+  }
+
+  // runOpportunityLifecycleAction(path, opportunityId, action, extra) --
+  // every APPROVE / EDIT THEN APPROVE / REJECT / prepared-edited-version
+  // control goes through the EXISTING SHARED lifecycle route
+  // (app/api/clients/[id]/opportunities/[opportunityId]/lifecycle/
+  // route.js) -- the same dispatcher SourceCitationWizard.js already
+  // uses, never a schema-specific approval endpoint. Always refreshes via
+  // the read-only GET afterward rather than trusting the lifecycle
+  // response's own shape (which varies per action).
+  async function runOpportunityLifecycleAction(path, opportunityId, action, extra = {}) {
+    setLifecycleBusyPaths(prev => new Set(prev).add(path))
+    clearPreparedWorkError(path)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/opportunities/${opportunityId}/lifecycle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ...extra })
+      })
+      const body = await res.json().catch(() => null)
+      if (!res.ok) {
+        setPreparedWorkErrors(prev => new Map(prev).set(path, body?.error || `Request failed (HTTP ${res.status}).`))
+        return
+      }
+      await refreshPreparedWork(path)
+      if (action === 'prepare_edited_version') {
+        setEditingDrafts(prev => {
+          if (!prev.has(path)) return prev
+          const next = new Map(prev)
+          next.delete(path)
+          return next
+        })
+      }
+    } catch (e) {
+      setPreparedWorkErrors(prev => new Map(prev).set(path, 'Could not reach the server.'))
+    } finally {
+      setLifecycleBusyPaths(prev => {
+        const next = new Set(prev)
+        next.delete(path)
+        return next
+      })
+    }
+  }
+
+  function startEditingPreparedWork(path, latestPayload) {
+    setEditingDrafts(prev => new Map(prev).set(path, JSON.stringify({ add: latestPayload?.add || [], modify: latestPayload?.modify || [] }, null, 2)))
+  }
+
+  function cancelEditingPreparedWork(path) {
+    setEditingDrafts(prev => {
+      const next = new Map(prev)
+      next.delete(path)
+      return next
+    })
+  }
+
+  // saveEditedPreparedWork -- instruction #6 (EDIT THEN APPROVE): creates a
+  // NEW prepared-work version via the shared lifecycle's
+  // 'prepare_edited_version' action (never overwrites the original). The
+  // edited add/modify replace the latest version's; everything else
+  // (keep/canonicalEntity/currentSchema/unresolvedDependencies) is carried
+  // over unchanged, since the AM is editing the proposed JSON-LD, not
+  // re-diagnosing the page.
+  function saveEditedPreparedWork(path, opportunityId, latest) {
+    const draft = editingDrafts.get(path)
+    let parsed
+    try {
+      parsed = JSON.parse(draft)
+    } catch (e) {
+      setPreparedWorkErrors(prev => new Map(prev).set(path, `Edited JSON-LD is not valid JSON: ${e.message}`))
+      return
+    }
+    const payload = { ...latest.payload, add: Array.isArray(parsed.add) ? parsed.add : latest.payload.add, modify: Array.isArray(parsed.modify) ? parsed.modify : latest.payload.modify }
+    runOpportunityLifecycleAction(path, opportunityId, 'prepare_edited_version', {
+      artifactType: 'schema_jsonld',
+      payload,
+      previousVersionId: latest.id,
+      evidenceContext: [{ text: 'Edited by AM before approval.', source: 'am_edit' }]
+    })
+  }
+
+  // approvePreparedWork -- dispatches to 'edit_then_approve' when the
+  // latest version is the AM's own edited version (created_by: 'am'),
+  // and plain 'approve' otherwise (a system-generated version an AM is
+  // approving as-is). Both take the SAME preparedWorkId; the only
+  // difference is which history event lib/opportunityLifecycle.js logs
+  // (edited_then_approved vs approved) -- see that file and the shared
+  // lifecycle route's own comments on why this distinction matters.
+  function approvePreparedWork(path, opportunityId, latest) {
+    const action = latest.created_by === 'am' ? 'edit_then_approve' : 'approve'
+    runOpportunityLifecycleAction(path, opportunityId, action, { preparedWorkId: latest.id })
+  }
+
+  function rejectPreparedWork(path, opportunityId) {
+    runOpportunityLifecycleAction(path, opportunityId, 'reject', { reason: 'am_rejected' })
   }
 
   function toggleAnalysisExpanded(path) {
@@ -932,6 +1289,22 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                   {analysis.path}{analysis.fetchState !== 'success' && ' — could not be analyzed'}
                 </div>
                 <PageAnalysisResult analysis={analysis} />
+                <PreparedWorkPanel
+                  path={effectiveOpenPath}
+                  analysis={analysis}
+                  prepared={preparedWorkByPath.get(effectiveOpenPath)}
+                  isPreparing={preparingPaths.has(effectiveOpenPath)}
+                  isBusy={lifecycleBusyPaths.has(effectiveOpenPath)}
+                  error={preparedWorkErrors.get(effectiveOpenPath)}
+                  editingDraft={editingDrafts.get(effectiveOpenPath)}
+                  onPrepare={() => prepareSchemaWorkNow(effectiveOpenPath)}
+                  onApprove={(latest) => approvePreparedWork(effectiveOpenPath, preparedWorkByPath.get(effectiveOpenPath)?.opportunity?.id, latest)}
+                  onStartEdit={(payload) => startEditingPreparedWork(effectiveOpenPath, payload)}
+                  onCancelEdit={() => cancelEditingPreparedWork(effectiveOpenPath)}
+                  onDraftChange={(text) => setEditingDrafts(prev => new Map(prev).set(effectiveOpenPath, text))}
+                  onSaveEdit={(latest) => saveEditedPreparedWork(effectiveOpenPath, preparedWorkByPath.get(effectiveOpenPath)?.opportunity?.id, latest)}
+                  onReject={() => rejectPreparedWork(effectiveOpenPath, preparedWorkByPath.get(effectiveOpenPath)?.opportunity?.id)}
+                />
               </div>
             )
           })() : pillar ? (() => {
