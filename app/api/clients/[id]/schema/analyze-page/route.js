@@ -1,5 +1,6 @@
 const { getSupabaseServerClient } = require('../../../../../../lib/supabaseServer')
-const { analyzePage } = require('../../../../../../lib/pageAnalysis')
+const { analyzePage, resolvePageUrl } = require('../../../../../../lib/pageAnalysis')
+const { upsertAnalysisResult } = require('../../../../../../lib/schemaPageWork')
 
 // Live page fetch -- same reasoning as schema/route.js's maxDuration (a
 // single external fetch, generous but bounded).
@@ -14,9 +15,12 @@ const maxDuration = 30
 // "Analyze page" action has a server-side place to run a real fetch (the
 // browser can't fetch an arbitrary client's live site directly -- CORS,
 // and this project's consistent "server does the fetching" convention,
-// same as schema/route.js's own live homepage fetch). No result is
-// persisted anywhere -- see lib/schemaPageLifecycle.js's header on why
-// this phase's page states are current-run / UI-state-only.
+// same as schema/route.js's own live homepage fetch). The in-memory page
+// LIFECYCLE state derived from this result (lib/schemaPageLifecycle.js) is
+// still current-run / UI-state-only, unchanged -- but the raw diagnosis
+// itself is now additionally persisted durably (Phase 5, 2026-09) via
+// lib/schemaPageWork.js below, best-effort, so a page refresh doesn't lose
+// it. See that call's own comment for the non-fatal error handling.
 //
 // `path` must be a site-relative path (as returned by
 // lib/sitemapDiscovery.js's page classification, e.g. "/denver-seo-agency/")
@@ -56,7 +60,32 @@ async function POST(request, { params }) {
   }
 
   const result = await analyzePage({ path, page, siteUrl: client.url })
-  return Response.json(result)
+
+  // PERSIST (Phase 5, 2026-09) -- every completed analysis, regardless of
+  // finalStatus (ACTION_REQUIRED, IMPROVEMENT_AVAILABLE, NO_ACTION_NEEDED,
+  // or COULD_NOT_VERIFY including a genuine fetch failure -- analyzePage()
+  // never throws, so `result` always exists), is saved durably so a page
+  // refresh doesn't lose it. This is best-effort/non-fatal: the diagnosis
+  // itself already succeeded above and must never be withheld from the AM
+  // because of a database hiccup, so a persistence failure here is
+  // reported alongside the real result rather than replacing it with an
+  // error response.
+  let persistence = { ok: true }
+  try {
+    const classification = page.type ? { type: page.type, source: page.classificationSource, confidence: page.classificationConfidence } : null
+    const pageUrl = resolvePageUrl(client.url, path)
+    await upsertAnalysisResult({ clientId: id, path, pageUrl, classification, analysis: result, actor: 'system' })
+  } catch (e) {
+    console.error('[schema/analyze-page] persistence failed:', e)
+    persistence = {
+      ok: false,
+      errorClass: 'persistence',
+      phase: 'upsert_analysis_result',
+      code: (e && typeof e.code === 'string') ? e.code : null
+    }
+  }
+
+  return Response.json({ ...result, persistence })
 }
 
 module.exports = { POST, maxDuration }

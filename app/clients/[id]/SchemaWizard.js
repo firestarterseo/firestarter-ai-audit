@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import SchemaGenerator from './SchemaGenerator'
 import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 import { computeRecommendedSet } from '../../../lib/schemaPagePriority'
 import { toggleQueuedPath, resolveOpenPath } from '../../../lib/schemaPageSelection'
 import { deriveHomepageState, deriveStateFromAnalysis, excludedPathsFromStates, getPageState } from '../../../lib/schemaPageLifecycle'
+import { mergeDurableQueuedPaths, mergeDurableAnalyses } from '../../../lib/schemaPageHydration'
 
 // RECOMMENDATION_BATCH_SIZE -- PRODUCT DECISION #2: "RECOMMENDATIONS SHOULD
 // COME IN BATCHES OF 10... This is: NEXT BEST 10, not: TOP 10 FOREVER."
@@ -289,7 +290,7 @@ const TIER_TONE = {
 // the checkbox, never inferred from "open"). A page can be open without
 // being queued, queued without being open, both, or neither -- the UI
 // never collapses these into one ambiguous highlight.
-function PageRow({ dossier, isOpen, isQueued, onOpen, onToggleQueue, showRecommendedBadge, homeChecksPassing, homeChecksTotal, pageState, isAnalyzing }) {
+function PageRow({ dossier, isOpen, isQueued, onOpen, onToggleQueue, showRecommendedBadge, homeChecksPassing, homeChecksTotal, pageState, isAnalyzing, queueError }) {
   const isHome = dossier.type === 'Home'
   // Home keeps its own real, already-audited label untouched (PRODUCT
   // DECISION #12). Every other page's status now reflects its real
@@ -299,27 +300,36 @@ function PageRow({ dossier, isOpen, isQueued, onOpen, onToggleQueue, showRecomme
   const statusText = isHome ? `Analyzed — ${homeChecksPassing} / ${homeChecksTotal} checks` : (isAnalyzing ? 'Analyzing…' : (PAGE_STATE_LABELS[pageState] || 'Not analyzed yet'))
 
   return (
-    <div className={`page-row${isOpen ? ' selected' : ''}`} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr auto', alignItems: 'center', gap: 10 }}>
-      <input
-        type="checkbox"
-        checked={isQueued}
-        onChange={() => onToggleQueue(dossier.path)}
-        aria-label={isQueued ? `Remove ${dossier.path} from schema work` : `Add ${dossier.path} to schema work`}
-        title={isQueued ? 'Queued for schema work -- click to remove' : 'Add to schema work'}
-      />
-      <span className="type-badge" title={dossier.reasons.map(r => r.text).join(' · ')} style={{ cursor: 'default' }}>
-        {dossier.type}
-      </span>
-      <span
-        className="path"
-        onClick={() => onOpen(dossier.path)}
-        style={{ cursor: 'pointer', textDecoration: isOpen ? 'underline' : 'none' }}
-      >
-        {dossier.path}
-        {showRecommendedBadge && <span className="text-tiny text-muted" style={{ marginLeft: 8 }}>&#9733; Recommended</span>}
-        {isQueued && <span className="text-tiny text-muted" style={{ marginLeft: 8 }}>Queued</span>}
-      </span>
-      <span className={`status ${statusTone}`}>{statusText}</span>
+    <div>
+      <div className={`page-row${isOpen ? ' selected' : ''}`} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr auto', alignItems: 'center', gap: 10 }}>
+        <input
+          type="checkbox"
+          checked={isQueued}
+          onChange={() => onToggleQueue(dossier.path)}
+          aria-label={isQueued ? `Remove ${dossier.path} from schema work` : `Add ${dossier.path} to schema work`}
+          title={isQueued ? 'Queued for schema work -- click to remove' : 'Add to schema work'}
+        />
+        <span className="type-badge" title={dossier.reasons.map(r => r.text).join(' · ')} style={{ cursor: 'default' }}>
+          {dossier.type}
+        </span>
+        <span
+          className="path"
+          onClick={() => onOpen(dossier.path)}
+          style={{ cursor: 'pointer', textDecoration: isOpen ? 'underline' : 'none' }}
+        >
+          {dossier.path}
+          {showRecommendedBadge && <span className="text-tiny text-muted" style={{ marginLeft: 8 }}>&#9733; Recommended</span>}
+          {isQueued && <span className="text-tiny text-muted" style={{ marginLeft: 8 }}>Queued</span>}
+        </span>
+        <span className={`status ${statusTone}`}>{statusText}</span>
+      </div>
+      {/* PERSISTENCE WIRING (Phase 5, 2026-09) -- a failed queue-toggle save
+          reverts the checkbox above (see toggleQueued) AND surfaces this
+          message, so an AM never wrongly believes a queue change survived a
+          refresh when the server never actually saved it. */}
+      {queueError && (
+        <p className="text-small issue-why" style={{ margin: '2px 0 0 24px' }}>Could not save this queue change: {queueError}</p>
+      )}
     </div>
   )
 }
@@ -596,8 +606,15 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   const pills = pillar ? schemaStatPills(pillar) : []
 
   // -------------------------------------------------------------------
-  // Phase A page-selection state (2026-09-02) -- see this file's header
-  // for why this is plain React state, not durable storage, in this phase.
+  // Phase A page-selection state (2026-09-02). `openPath` (which page is
+  // currently open) remains plain, current-run-only React state -- there is
+  // no product requirement to remember it across a refresh. `queuedPaths`
+  // is still a plain React Set for the SAME reason toggleQueued below is
+  // still an immediate, optimistic local update (an AM's click must never
+  // feel gated on a network round trip) -- but as of Phase 5 (2026-09) it
+  // is also durably persisted (lib/schemaPageWork.js, via the page-work/queue
+  // route) and hydrated back on mount (see durableRows/hydratedPageWorkRef
+  // below), so a refresh no longer loses it.
   // -------------------------------------------------------------------
   const [clientProfile, setClientProfile] = useState({ primaryServices: [], secondaryServices: [], geographies: [] })
   const [openPath, setOpenPath] = useState(null)
@@ -605,9 +622,11 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   // -------------------------------------------------------------------
   // Phase B page-analysis state (2026-09-02) -- see lib/pageAnalysis.js and
   // lib/schemaPageLifecycle.js's headers for why this is real fetched
-  // evidence (via the analyze-page API route), kept as plain React state
-  // (current-run / UI-state-only, same as queuedPaths above) rather than
-  // persisted anywhere.
+  // evidence (via the analyze-page API route). As of Phase 5 (2026-09),
+  // every completed analysis is also durably persisted (lib/schemaPageWork.js)
+  // and hydrated back into this Map on mount (see durableRows/
+  // hydratedPageWorkRef below) -- `pageAnalyses` itself stays a plain React
+  // Map for the same "instant local update" reasoning as queuedPaths above.
   // -------------------------------------------------------------------
   const [pageAnalyses, setPageAnalyses] = useState(() => new Map()) // path -> lib/pageAnalysis.js result
   const [analyzingPaths, setAnalyzingPaths] = useState(() => new Set()) // paths with an in-flight "Analyze page" request
@@ -621,6 +640,28 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   // run, stays visible on request regardless of its NO_ACTION_NEEDED /
   // ACTIONABLE_GAP conclusion -- "DO NOT HIDE PASSING PAGES' ANALYSIS."
   const [expandedAnalysisPaths, setExpandedAnalysisPaths] = useState(() => new Set())
+  // queuePersistErrors -- a queue/unqueue toggle that failed to save
+  // server-side (see toggleQueued below, which reverts the optimistic
+  // local change when this happens). analysisPersistWarnings -- a
+  // completed, correctly-shown analysis whose durable save failed (see
+  // analyzePageNow below); non-blocking, since the diagnosis itself is
+  // still real and correct -- only a refresh could lose it.
+  const [queuePersistErrors, setQueuePersistErrors] = useState(() => new Map())
+  const [analysisPersistWarnings, setAnalysisPersistWarnings] = useState(() => new Map())
+
+  // -------------------------------------------------------------------
+  // Durable Schema page-work state (Phase 5, 2026-09) -- see
+  // lib/schemaPageWork.js and lib/schemaPageHydration.js. `durableRows` is
+  // a plain read-only cache of GET /api/clients/[id]/schema/page-work,
+  // fetched once on mount; `hydratedPageWorkRef` guards the ONE-TIME merge
+  // of that durable state into queuedPaths/pageAnalyses below so a later
+  // sitemap/recommendation recompute (or a slow-resolving fetch) can never
+  // re-apply now-stale durable state over an AM's own in-session actions
+  // (Section 9/12 of the Phase 5 spec -- "never wipe durable state... "
+  // cuts both ways).
+  // -------------------------------------------------------------------
+  const [durableRows, setDurableRows] = useState(null) // null = not yet loaded
+  const hydratedPageWorkRef = useRef(false)
 
   // -------------------------------------------------------------------
   // Schema Prepared Work + AM Review state (Phase 6, 2026-09-03). Unlike
@@ -677,6 +718,48 @@ export default function SchemaWizard({ pillar, clientId, client }) {
       ? realPages
       : [{ path: '/', type: 'Home', sourceSitemap: null, classificationSource: 'url_pattern', classificationConfidence: 'high', classificationReason: 'This is the homepage.' }]
   ), [realPages])
+
+  // Durable Schema page-work hydration (Phase 5, 2026-09) -- a single,
+  // best-effort read of every durable schema_page_work row for this
+  // client, once per mount. A failed/empty fetch just means hydration
+  // never runs (queuedPaths/pageAnalyses simply stay current-run-only, as
+  // they always were before this phase) -- it never blocks the page list
+  // itself from rendering, same discipline as the client-profile fetch
+  // above.
+  useEffect(() => {
+    let cancelled = false
+    async function loadPageWork() {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/schema/page-work`)
+        if (!res.ok) return
+        const body = await res.json()
+        if (cancelled) return
+        setDurableRows(Array.isArray(body.pages) ? body.pages : [])
+      } catch (e) {
+        // Best-effort -- see comment above.
+      }
+    }
+    if (clientId) loadPageWork()
+    return () => { cancelled = true }
+  }, [clientId])
+
+  // ONE-TIME merge of durable state into queuedPaths/pageAnalyses, as soon
+  // as both the durable rows AND the candidate-page list are available.
+  // Guarded by hydratedPageWorkRef so this never re-runs on a later
+  // sitemap/recommendation recompute -- see that ref's declaration above
+  // for why. Seeding pageAnalyses here is sufficient for the recommendation
+  // engine's exclusion/eligibility to reflect durable state correctly, with
+  // ZERO changes to lib/schemaPageLifecycle.js or lib/schemaPagePriority.js
+  // (pageStates below is a useMemo purely derived from pageAnalyses).
+  useEffect(() => {
+    if (hydratedPageWorkRef.current) return
+    if (durableRows === null) return
+    if (!candidatePages || candidatePages.length === 0) return
+    hydratedPageWorkRef.current = true
+    const candidatePaths = candidatePages.map(p => p.path)
+    setQueuedPaths(prev => mergeDurableQueuedPaths(prev, durableRows, candidatePaths))
+    setPageAnalyses(prev => mergeDurableAnalyses(prev, durableRows, candidatePaths))
+  }, [durableRows, candidatePages])
 
   // homepagePath -- 2026-09-02 CORRECTION: the live validation found the
   // homepage still showing up Recommended despite 7/7 checks passing. ROOT
@@ -758,8 +841,45 @@ export default function SchemaWizard({ pillar, clientId, client }) {
     return () => { cancelled = true }
   }, [effectiveOpenPath, isHomeOpen, clientId, preparedWorkByPath])
 
-  function toggleQueued(path) {
+  // toggleQueued(path) -- Phase 5 (2026-09): still an immediate, optimistic
+  // local toggle (an AM's click must never feel gated on a network round
+  // trip), but now also persists the change durably via POST
+  // /api/clients/[id]/schema/page-work/queue. On a genuine failure (the
+  // fetch() call itself failing, or the server returning a real HTTP
+  // error), the optimistic toggle is REVERTED and the failure is surfaced
+  // per-path via queuePersistErrors -- an AM must never be left believing a
+  // queue change survived a refresh when the server never actually saved
+  // it (Section 15's "never claim Queued/Analyzed/Saved if the write
+  // failed," applied here to the queue action specifically).
+  async function toggleQueued(path) {
+    const wasQueued = queuedPaths.has(path)
     setQueuedPaths(prev => toggleQueuedPath(prev, path))
+    setQueuePersistErrors(prev => {
+      if (!prev.has(path)) return prev
+      const next = new Map(prev)
+      next.delete(path)
+      return next
+    })
+    const dossier = all.find(d => d.path === path)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/schema/page-work/queue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path,
+          queued: !wasQueued,
+          page: dossier ? { type: dossier.type } : undefined
+        })
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        setQueuedPaths(prev => toggleQueuedPath(prev, path)) // revert
+        setQueuePersistErrors(prev => new Map(prev).set(path, body?.error || `Request failed (HTTP ${res.status}).`))
+      }
+    } catch (e) {
+      setQueuedPaths(prev => toggleQueuedPath(prev, path)) // revert
+      setQueuePersistErrors(prev => new Map(prev).set(path, 'Could not reach the server to save this queue change.'))
+    }
   }
 
   // analyzePageNow(path) -- PRODUCT DECISION #6/#8's real QUEUED PAGE ->
@@ -804,6 +924,17 @@ export default function SchemaWizard({ pillar, clientId, client }) {
       // output immediately, not have to click a second "View analysis"
       // button to see what they just asked for.
       setExpandedAnalysisPaths(prev => new Set(prev).add(path))
+      // Phase 5 (2026-09): the diagnosis above is always real and correct
+      // regardless of whether it was saved durably (see analyze-page/route.js's
+      // own non-fatal persistence handling) -- a save failure is surfaced as
+      // a NON-BLOCKING warning, never substituted for the real result and
+      // never treated as an analysisRequestErrors-style failure.
+      setAnalysisPersistWarnings(prev => {
+        const next = new Map(prev)
+        if (body.persistence && body.persistence.ok === false) next.set(path, 'Diagnosis succeeded but could not be saved -- it may not persist after a refresh.')
+        else next.delete(path)
+        return next
+      })
     } catch (e) {
       setAnalysisRequestErrors(prev => new Map(prev).set(path, 'Could not reach the server to analyze this page.'))
     } finally {
@@ -1122,7 +1253,8 @@ export default function SchemaWizard({ pillar, clientId, client }) {
               homeChecksPassing,
               homeChecksTotal,
               pageState: getPageState(pageStates, dossier.path),
-              isAnalyzing: analyzingPaths.has(dossier.path)
+              isAnalyzing: analyzingPaths.has(dossier.path),
+              queueError: queuePersistErrors.get(dossier.path) || null
             })
             const queuedDossiers = all.filter(d => queuedPaths.has(d.path))
             return (
@@ -1133,7 +1265,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                     Pages below are real page URLs discovered from this client&rsquo;s sitemap hierarchy (child sitemaps are followed automatically when the root sitemap is an index -- sitemap XML files themselves never appear here). Recommended pages are the ones most likely worth schema work first, based on page type and (where available) this client&rsquo;s AM-confirmed primary/secondary services and geography -- hover a page&rsquo;s type badge to see exactly why it landed where it did. Only the homepage is actually run through the Schema &amp; Structure checker&rsquo;s 7 checks today; every other page is honestly marked &ldquo;Not analyzed yet&rdquo; rather than a guessed result.
                   </div>
                   <div className="text-tiny text-muted">
-                    {queuedPaths.size} page{queuedPaths.size === 1 ? '' : 's'} queued for schema work &mdash; kept only in this browser session (clears on refresh or a new audit run; durable tracking is a later phase).
+                    {queuedPaths.size} page{queuedPaths.size === 1 ? '' : 's'} queued for schema work &mdash; saved durably, so this survives a refresh.
                   </div>
                 </div>
 
@@ -1161,6 +1293,8 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                         const state = getPageState(pageStates, dossier.path)
                         const isAnalyzing = analyzingPaths.has(dossier.path)
                         const reqError = analysisRequestErrors.get(dossier.path)
+                        const persistWarning = analysisPersistWarnings.get(dossier.path)
+                        const queueError = queuePersistErrors.get(dossier.path)
                         const analysis = pageAnalyses.get(dossier.path)
                         const isExpanded = expandedAnalysisPaths.has(dossier.path)
                         return (
@@ -1182,6 +1316,8 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                                 {dossier.type === 'Home' ? 'Already analyzed' : (state === 'UNANALYZED' ? 'Analyze page' : 'Re-analyze page')}
                               </button>
                             </div>
+                            {queueError && <p className="text-small issue-why" style={{ margin: '6px 0 0' }}>Could not save this queue change: {queueError}</p>}
+                            {persistWarning && <p className="text-small issue-why" style={{ margin: '6px 0 0' }}>{persistWarning}</p>}
                             {isExpanded && analysis && (
                               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
                                 <PageAnalysisResult analysis={analysis} />
@@ -1227,6 +1363,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                       const state = getPageState(pageStates, openDossier.path)
                       const isAnalyzing = analyzingPaths.has(openDossier.path)
                       const reqError = analysisRequestErrors.get(openDossier.path)
+                      const persistWarning = analysisPersistWarnings.get(openDossier.path)
                       return (
                         <>
                           <p className="text-tiny text-muted" style={{ margin: '0 0 10px' }}>
@@ -1236,6 +1373,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                             {state === 'NO_ACTION_NEEDED' && 'Analyzed -- no actionable schema gap found on this page.'}
                             {reqError && ` (${reqError})`}
                           </p>
+                          {persistWarning && <p className="text-small issue-why" style={{ margin: '0 0 10px' }}>{persistWarning}</p>}
                           <button
                             className="btn btn-secondary"
                             disabled={isAnalyzing}
@@ -1253,6 +1391,9 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                     >
                       {queuedPaths.has(openDossier.path) ? 'Remove from schema work' : 'Add to schema work'}
                     </button>
+                    {queuePersistErrors.get(openDossier.path) && (
+                      <p className="text-small issue-why" style={{ margin: '6px 0 0' }}>Could not save this queue change: {queuePersistErrors.get(openDossier.path)}</p>
+                    )}
                   </div>
                 )}
               </div>

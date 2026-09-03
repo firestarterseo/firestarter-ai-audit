@@ -3,6 +3,7 @@ const { analyzePage, resolvePageUrl } = require('../../../../../../lib/pageAnaly
 const { isEligibleForPreparedWork, qualifySchemaPageOpportunity, buildSchemaOpportunityFingerprint } = require('../../../../../../lib/schemaOpportunity')
 const { buildPreparedSchemaWork } = require('../../../../../../lib/schemaPreparedWork')
 const { prepareWork, submitForApproval, getPreparedWork, getOpportunityHistory } = require('../../../../../../lib/opportunityLifecycle')
+const { upsertAnalysisResult, linkOpportunity } = require('../../../../../../lib/schemaPageWork')
 
 // Live page fetch (twice -- see lib/schemaPreparedWork.js's own header on
 // why buildPreparedSchemaWork does its own independent fetch rather than
@@ -106,6 +107,30 @@ async function POST(request, { params }) {
   }
   const { opportunityId } = qualifyResult
 
+  // PAGE-WORK PERSISTENCE (Phase 5, 2026-09) -- best-effort/non-fatal. By
+  // this point the real Phase 3 artifact (the opportunity) is already
+  // durably saved, so a schema_page_work write failure must never fail
+  // the overall Prepare Schema Work flow -- it is reported back via
+  // `pageWorkPersistence` for transparency instead. Persists the fresh
+  // diagnosis (same as analyze-page/route.js does) and then links this
+  // page's durable row to the opportunity just qualified above -- both
+  // idempotent, so repeated preparation of the same stable page/opportunity
+  // never duplicates a row or a history event (lib/schemaPageWork.js).
+  let pageWorkPersistence = { ok: true }
+  try {
+    const classification = page.type ? { type: page.type, source: page.classificationSource, confidence: page.classificationConfidence } : null
+    await upsertAnalysisResult({ clientId: id, path, pageUrl, classification, targetProfile: analysis.targetProfile, analysis, actor: 'am' })
+    await linkOpportunity({ clientId: id, path, pageUrl, opportunityId, actor: 'am' })
+  } catch (e) {
+    console.error('[schema/prepare-work] page-work persistence failed:', e)
+    pageWorkPersistence = {
+      ok: false,
+      errorClass: 'persistence',
+      phase: 'page_work_persistence',
+      code: (e && typeof e.code === 'string') ? e.code : null
+    }
+  }
+
   // PREPARE -- builds the proposed JSON-LD. A thrown error here is also a
   // PREPARATION failure (not persistence): the opportunity above is
   // already durably saved regardless of what happens next.
@@ -119,7 +144,7 @@ async function POST(request, { params }) {
       recommendedChecks: analysis.recommendedChecks
     })
   } catch (e) {
-    return logAndClassify(e, 'build_prepared_work', 'The schema opportunity was saved, but generating the proposed schema failed. Try preparing this page again.', { analysis, opportunityId })
+    return logAndClassify(e, 'build_prepared_work', 'The schema opportunity was saved, but generating the proposed schema failed. Try preparing this page again.', { analysis, opportunityId, pageWorkPersistence })
   }
 
   // SUBMIT-FOR-APPROVAL -- the second durable write. A thrown error here is
@@ -147,7 +172,7 @@ async function POST(request, { params }) {
       await submitForApproval(opportunityId, { preparedWorkId: preparedWorkResult.preparedWorkId, actor: 'am' })
     }
   } catch (e) {
-    return logAndClassify(e, 'prepare_work', 'The schema opportunity was saved, but the prepared work could not be saved. Try preparing this page again.', { analysis, opportunityId })
+    return logAndClassify(e, 'prepare_work', 'The schema opportunity was saved, but the prepared work could not be saved. Try preparing this page again.', { analysis, opportunityId, pageWorkPersistence })
   }
 
   let preparedWorkVersions, opportunityRow
@@ -158,14 +183,15 @@ async function POST(request, { params }) {
     ])
     if (opportunityRow.error) throw opportunityRow.error
   } catch (e) {
-    return logAndClassify(e, 'final_read', 'Preparation likely succeeded, but the result could not be read back. Refresh this page to check.', { opportunityId })
+    return logAndClassify(e, 'final_read', 'Preparation likely succeeded, but the result could not be read back. Refresh this page to check.', { opportunityId, pageWorkPersistence })
   }
 
   return Response.json({
     analysis,
     opportunity: opportunityRow.data,
     preparedWork: preparedWorkVersions,
-    action: qualifyResult.action
+    action: qualifyResult.action,
+    pageWorkPersistence
   })
 }
 

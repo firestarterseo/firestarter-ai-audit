@@ -13,6 +13,7 @@ const pageAnalysisPath = require.resolve(path.join(__dirname, '../../../../../..
 const schemaOpportunityPath = require.resolve(path.join(__dirname, '../../../../../../lib/schemaOpportunity'))
 const schemaPreparedWorkPath = require.resolve(path.join(__dirname, '../../../../../../lib/schemaPreparedWork'))
 const opportunityLifecyclePath = require.resolve(path.join(__dirname, '../../../../../../lib/opportunityLifecycle'))
+const schemaPageWorkPath = require.resolve(path.join(__dirname, '../../../../../../lib/schemaPageWork'))
 const routePath = require.resolve(path.join(__dirname, 'route'))
 
 // ---------------------------------------------------------------------
@@ -102,7 +103,9 @@ const spies = {
   prepareWork: makeSpy(async () => ({ preparedWorkId: 'pw-1', version: 1, status: 'ready_for_review' })),
   submitForApproval: makeSpy(async () => ({ ok: true })),
   getPreparedWork: makeSpy(async () => ([{ id: 'pw-1', version: 1, status: 'ready_for_review' }])),
-  getOpportunityHistory: makeSpy(async () => ([]))
+  getOpportunityHistory: makeSpy(async () => ([])),
+  upsertAnalysisResult: makeSpy(async () => ({ id: 'pw-row-1' })),
+  linkOpportunity: makeSpy(async () => ({ id: 'pw-row-1', opportunity_id: 'opp-1' }))
 }
 
 require.cache[supabaseServerPath] = { id: supabaseServerPath, filename: supabaseServerPath, loaded: true, exports: { getSupabaseServerClient: () => fakeSupabase() } }
@@ -110,6 +113,7 @@ require.cache[pageAnalysisPath] = { id: pageAnalysisPath, filename: pageAnalysis
 require.cache[schemaOpportunityPath] = { id: schemaOpportunityPath, filename: schemaOpportunityPath, loaded: true, exports: { isEligibleForPreparedWork: spies.isEligibleForPreparedWork, qualifySchemaPageOpportunity: spies.qualifySchemaPageOpportunity, buildSchemaOpportunityFingerprint: spies.buildSchemaOpportunityFingerprint } }
 require.cache[schemaPreparedWorkPath] = { id: schemaPreparedWorkPath, filename: schemaPreparedWorkPath, loaded: true, exports: { buildPreparedSchemaWork: spies.buildPreparedSchemaWork } }
 require.cache[opportunityLifecyclePath] = { id: opportunityLifecyclePath, filename: opportunityLifecyclePath, loaded: true, exports: { prepareWork: spies.prepareWork, submitForApproval: spies.submitForApproval, getPreparedWork: spies.getPreparedWork, getOpportunityHistory: spies.getOpportunityHistory } }
+require.cache[schemaPageWorkPath] = { id: schemaPageWorkPath, filename: schemaPageWorkPath, loaded: true, exports: { upsertAnalysisResult: spies.upsertAnalysisResult, linkOpportunity: spies.linkOpportunity } }
 
 const { POST, GET } = require(routePath)
 
@@ -126,6 +130,8 @@ function resetAll() {
   spies.submitForApproval.reset(async () => ({ ok: true }))
   spies.getPreparedWork.reset(async () => ([{ id: 'pw-1', version: 1, status: 'ready_for_review' }]))
   spies.getOpportunityHistory.reset(async () => ([]))
+  spies.upsertAnalysisResult.reset(async () => ({ id: 'pw-row-1' }))
+  spies.linkOpportunity.reset(async () => ({ id: 'pw-row-1', opportunity_id: 'opp-1' }))
 }
 
 function req(body) { return { json: async () => body } }
@@ -202,7 +208,33 @@ async function testEligibleAnalysisRunsFullFlow() {
   const body = await res.json()
   assert.strictEqual(body.opportunity.id, 'opp-1')
   assert.ok(Array.isArray(body.preparedWork))
+  assert.strictEqual(spies.upsertAnalysisResult.calls.length, 1, 'a successful prepare must persist the fresh diagnosis to schema_page_work')
+  assert.strictEqual(spies.upsertAnalysisResult.calls[0][0].clientId, 'client-1')
+  assert.strictEqual(spies.upsertAnalysisResult.calls[0][0].actor, 'am')
+  assert.strictEqual(spies.linkOpportunity.calls.length, 1, 'a successful prepare must link the durable page-work row to the opportunity just qualified')
+  assert.strictEqual(spies.linkOpportunity.calls[0][0].opportunityId, 'opp-1')
+  assert.deepStrictEqual(body.pageWorkPersistence, { ok: true })
   log('TEST (an eligible page runs the full ANALYZE -> QUALIFY -> PREPARE -> SUBMIT-FOR-APPROVAL flow, never touching WordPress/execution/verification) PASSED')
+}
+
+// ---------------------------------------------------------------------
+// 4b. A schema_page_work persistence failure is non-fatal -- the real
+//    Phase 3 opportunity/prepared-work already succeeded and must still
+//    be returned, with the failure reported via pageWorkPersistence.
+// ---------------------------------------------------------------------
+async function testPageWorkPersistenceFailureIsNonFatal() {
+  resetAll()
+  spies.upsertAnalysisResult.reset(async () => { throw Object.assign(new Error('relation "schema_page_work" does not exist'), { code: '42P01' }) })
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200, 'a page-work persistence failure must never fail the overall Prepare Schema Work response')
+  const body = await res.json()
+  assert.strictEqual(body.opportunity.id, 'opp-1', 'the real Phase 3 opportunity must still be returned')
+  assert.strictEqual(spies.linkOpportunity.calls.length, 0, 'linkOpportunity must never be called after upsertAnalysisResult throws')
+  assert.strictEqual(body.pageWorkPersistence.ok, false)
+  assert.strictEqual(body.pageWorkPersistence.errorClass, 'persistence')
+  assert.strictEqual(body.pageWorkPersistence.code, '42P01')
+  assert.ok(!JSON.stringify(body.pageWorkPersistence).includes('does not exist'), 'the raw Postgres error message must never be echoed to the client')
+  log('TEST (a schema_page_work persistence failure is non-fatal -- the opportunity/prepared-work flow still succeeds, reported via pageWorkPersistence) PASSED')
 }
 
 // ---------------------------------------------------------------------
@@ -370,6 +402,7 @@ async function main() {
   await testClientLookup()
   await testIneligibleAnalysisNeverQualifiesOrPrepares()
   await testEligibleAnalysisRunsFullFlow()
+  await testPageWorkPersistenceFailureIsNonFatal()
   await testPreparationFailedNeverSubmittedForApproval()
   await testNeverCallsExecutionOrVerificationOrPublish()
   await testGetReturnsExistingOpportunityWithoutRefetching()
