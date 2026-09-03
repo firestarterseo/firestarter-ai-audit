@@ -324,6 +324,80 @@ function PageRow({ dossier, isOpen, isQueued, onOpen, onToggleQueue, showRecomme
   )
 }
 
+// PageAnalysisResult -- PRODUCT DECISION (2026-09-02 PAGE ANALYSIS RESULT
+// UX pass): renders the FULL diagnostic breakdown for one analyzed page --
+// the real current schema detected, an ordered PASS/FAIL check list (each
+// with a short, data-derived evidence sentence -- see
+// lib/schemaPageTypeChecks.js's `evidence` fields), a separate "not
+// applicable" list (explicitly never counted as a failure), and a final
+// conclusion line. Shared between the Schema work queue's inline expansion
+// and Step 3's "What's missing" view for a non-homepage page, so a page's
+// diagnostic result reads identically wherever an AM looks at it.
+//
+// This directly answers the live-validation finding that a queued page
+// showing only "NO ACTION NEEDED / RE-ANALYZE PAGE" was not enough: "MAKE
+// 'NO ACTION NEEDED' A CONCLUSION, NOT THE ENTIRE RESULT... DO NOT HIDE
+// PASSING PAGES' ANALYSIS." Every applicable check -- pass or fail -- is
+// always rendered here; the conclusion line is the LAST thing shown, never
+// the only thing shown.
+function PageAnalysisResult({ analysis }) {
+  if (!analysis) return null
+
+  if (analysis.fetchState !== 'success') {
+    return (
+      <p className="text-small issue-why">
+        {analysis.failureDetail || `Fetch failed (${analysis.failureCategory}).`} This is an honest fetch failure, not evidence the page has no schema -- try Re-analyze page once the issue above is resolved.
+      </p>
+    )
+  }
+
+  return (
+    <div>
+      <div className="grade-sub" style={{ marginBottom: 10 }}>
+        Classification: {analysis.classification.type} (source: {analysis.classification.source}, confidence: {analysis.classification.confidence})
+      </div>
+
+      <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 6px' }}>Current schema detected</div>
+      <p className="text-tiny text-muted" style={{ margin: '0 0 14px' }}>
+        {analysis.currentSchema.length > 0 ? analysis.currentSchema.join(', ') : 'None found'}
+      </p>
+
+      <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Checks</div>
+      <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
+        {analysis.applicable.map(c => (
+          <div className="issue-item" key={c.id}>
+            <span className={`issue-badge ${c.status === 'pass' ? 'issue-passing' : 'issue-critical'}`}>
+              {c.status === 'pass' ? 'Pass' : 'Fail'}
+            </span>
+            <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{c.label}</div>
+            <p className="text-small issue-why">{c.evidence}</p>
+          </div>
+        ))}
+      </div>
+
+      {analysis.notApplicable.length > 0 && (
+        <>
+          <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Not applicable to this page type</div>
+          <p className="text-tiny text-muted" style={{ margin: '0 0 16px' }}>
+            {analysis.notApplicable.map(c => c.label).join(', ')} &mdash; not counted as failures.
+          </p>
+        </>
+      )}
+
+      <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 4px' }}>
+        Result: {analysis.actionableGap
+          ? `${analysis.missingOrInvalid.length} actionable schema gap${analysis.missingOrInvalid.length === 1 ? '' : 's'} found`
+          : 'No actionable schema gap found'}
+      </div>
+      {analysis.actionableGap && (
+        <p className="text-tiny text-muted" style={{ margin: 0 }}>
+          Recommended next action: address {analysis.missingOrInvalid.map(c => c.label.toLowerCase()).join('; ')}.
+        </p>
+      )}
+    </div>
+  )
+}
+
 export default function SchemaWizard({ pillar, clientId, client }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
@@ -346,6 +420,15 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   const [pageAnalyses, setPageAnalyses] = useState(() => new Map()) // path -> lib/pageAnalysis.js result
   const [analyzingPaths, setAnalyzingPaths] = useState(() => new Set()) // paths with an in-flight "Analyze page" request
   const [analysisRequestErrors, setAnalysisRequestErrors] = useState(() => new Map()) // path -> message, only for a failed CALL to our own route (network/HTTP) -- a page that fetched but came back non-HTML/404/etc is a normal, successful analyzePage() result, not an error here
+  // expandedAnalysisPaths -- PAGE ANALYSIS RESULT UX pass (2026-09-02):
+  // which queued pages currently have their full diagnostic breakdown
+  // expanded inline in the Schema work queue. Deliberately separate from
+  // `openPath`/`effectiveOpenPath` -- viewing a page's analysis in the
+  // queue must never change which page is "open," and vice versa (same
+  // independence discipline as OPEN vs QUEUED). A page's analysis, once
+  // run, stays visible on request regardless of its NO_ACTION_NEEDED /
+  // ACTIONABLE_GAP conclusion -- "DO NOT HIDE PASSING PAGES' ANALYSIS."
+  const [expandedAnalysisPaths, setExpandedAnalysisPaths] = useState(() => new Set())
 
   // Best-effort fetch of this client's AM-CONFIRMED profile fields (reuses
   // the existing GET /api/clients/[id]/profile-fields route -- no new
@@ -487,6 +570,11 @@ export default function SchemaWizard({ pillar, clientId, client }) {
         return
       }
       setPageAnalyses(prev => new Map(prev).set(path, body))
+      // Auto-expand the result the moment a fresh analysis completes -- an
+      // AM who just clicked "Analyze page" should see the real diagnostic
+      // output immediately, not have to click a second "View analysis"
+      // button to see what they just asked for.
+      setExpandedAnalysisPaths(prev => new Set(prev).add(path))
     } catch (e) {
       setAnalysisRequestErrors(prev => new Map(prev).set(path, 'Could not reach the server to analyze this page.'))
     } finally {
@@ -496,6 +584,15 @@ export default function SchemaWizard({ pillar, clientId, client }) {
         return next
       })
     }
+  }
+
+  function toggleAnalysisExpanded(path) {
+    setExpandedAnalysisPaths(prev => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
   }
 
   return (
@@ -624,7 +721,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                     A rolling batch, not a fixed top {RECOMMENDATION_BATCH_SIZE} -- once a page here needs no more action, the next-best eligible page from the full discovered universe takes its place. Checking a box below adds a page to the Schema work queue; it does not analyze or queue it on its own.
                   </p>
                   {recommended.length === 0 && (
-                    <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>No pages met the bar for recommendation this run -- see &ldquo;View all discovered pages&rdquo; below.</p>
+                    <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>No pages currently meet the bar for recommendation -- every discovered page is either resolved or already queued.</p>
                   )}
                   <div style={{ display: 'grid', gap: 6 }}>
                     {recommended.map(dossier => <PageRow {...rowProps(dossier)} showRecommendedBadge={false} />)}
@@ -642,18 +739,32 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                         const state = getPageState(pageStates, dossier.path)
                         const isAnalyzing = analyzingPaths.has(dossier.path)
                         const reqError = analysisRequestErrors.get(dossier.path)
+                        const analysis = pageAnalyses.get(dossier.path)
+                        const isExpanded = expandedAnalysisPaths.has(dossier.path)
                         return (
-                          <div key={dossier.path} className="page-row" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', alignItems: 'center', gap: 10 }}>
-                            <span className="type-badge" style={{ cursor: 'default' }}>{dossier.type}</span>
-                            <span className="path" onClick={() => setOpenPath(dossier.path)} style={{ cursor: 'pointer', textDecoration: dossier.path === effectiveOpenPath ? 'underline' : 'none' }}>
-                              {dossier.path}
-                            </span>
-                            <span className={`status ${isAnalyzing ? 'caution' : PAGE_STATE_TONE[state] || 'muted'}`}>
-                              {isAnalyzing ? 'Analyzing…' : (reqError || PAGE_STATE_LABELS[state] || 'Not analyzed yet')}
-                            </span>
-                            <button className="btn btn-secondary" disabled={isAnalyzing || dossier.type === 'Home'} onClick={() => analyzePageNow(dossier.path)}>
-                              {dossier.type === 'Home' ? 'Already analyzed' : (state === 'UNANALYZED' ? 'Analyze page' : 'Re-analyze page')}
-                            </button>
+                          <div key={dossier.path} className="card" style={{ padding: 10 }}>
+                            <div className="page-row" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto auto', alignItems: 'center', gap: 10 }}>
+                              <span className="type-badge" style={{ cursor: 'default' }}>{dossier.type}</span>
+                              <span className="path" onClick={() => setOpenPath(dossier.path)} style={{ cursor: 'pointer', textDecoration: dossier.path === effectiveOpenPath ? 'underline' : 'none' }}>
+                                {dossier.path}
+                              </span>
+                              <span className={`status ${isAnalyzing ? 'caution' : PAGE_STATE_TONE[state] || 'muted'}`}>
+                                {isAnalyzing ? 'Analyzing…' : (reqError || PAGE_STATE_LABELS[state] || 'Not analyzed yet')}
+                              </span>
+                              {analysis && (
+                                <button className="btn btn-secondary" onClick={() => toggleAnalysisExpanded(dossier.path)}>
+                                  {isExpanded ? 'Hide analysis' : 'View analysis'}
+                                </button>
+                              )}
+                              <button className="btn btn-secondary" disabled={isAnalyzing || dossier.type === 'Home'} onClick={() => analyzePageNow(dossier.path)}>
+                                {dossier.type === 'Home' ? 'Already analyzed' : (state === 'UNANALYZED' ? 'Analyze page' : 'Re-analyze page')}
+                              </button>
+                            </div>
+                            {isExpanded && analysis && (
+                              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                                <PageAnalysisResult analysis={analysis} />
+                              </div>
+                            )}
                           </div>
                         )
                       })}
@@ -769,7 +880,6 @@ export default function SchemaWizard({ pillar, clientId, client }) {
             // APPLICABLE / MISSING-INVALID / NOT APPLICABLE / ACTIONABLE
             // SCHEMA GAP -- never the homepage's 7 checks.
             const analysis = pageAnalyses.get(effectiveOpenPath)
-            const dossier = all.find(d => d.path === effectiveOpenPath)
             if (!analysis) {
               return (
                 <div className="card-empty" style={{ padding: 18 }}>
@@ -777,71 +887,12 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                 </div>
               )
             }
-            if (analysis.fetchState !== 'success') {
-              return (
-                <div className="card" style={{ padding: 18 }}>
-                  <div className="grade-title" style={{ marginBottom: 8 }}>{analysis.path} &mdash; could not be analyzed</div>
-                  <p className="text-small issue-why">
-                    {analysis.failureDetail || `Fetch failed (${analysis.failureCategory}).`} This is an honest fetch failure, not evidence the page has no schema -- try Re-analyze page once the issue above is resolved.
-                  </p>
-                </div>
-              )
-            }
-            const AnalysisListRow = ({ label, tone }) => (
-              <div className="issue-item" key={label}>
-                <span className={`issue-badge ${tone === 'good' ? 'issue-passing' : tone === 'bad' ? 'issue-critical' : 'issue-minor'}`}>
-                  {tone === 'good' ? 'Present' : tone === 'bad' ? 'Missing / invalid' : 'Not applicable'}
-                </span>
-                <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{label}</div>
-              </div>
-            )
             return (
               <div className="card" style={{ padding: 18 }}>
-                <div className="grade-title" style={{ marginBottom: 2 }}>{analysis.path}</div>
-                <div className="grade-sub" style={{ marginBottom: 4 }}>
-                  Classification: {analysis.classification.type} (source: {analysis.classification.source}, confidence: {analysis.classification.confidence})
+                <div className="grade-title" style={{ marginBottom: 10 }}>
+                  {analysis.path}{analysis.fetchState !== 'success' && ' — could not be analyzed'}
                 </div>
-                <div className="grade-sub" style={{ marginBottom: 14 }}>
-                  Current schema on this page: {analysis.currentSchema.length > 0 ? analysis.currentSchema.join(', ') : 'None found'}
-                </div>
-
-                <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>
-                  Actionable schema gap: {analysis.actionableGap ? 'Yes' : 'No'}
-                </div>
-                {analysis.actionableGap ? (
-                  <p className="text-tiny text-muted" style={{ margin: '0 0 12px' }}>
-                    This page has a real, genuinely-applicable schema gap -- see &ldquo;Missing / invalid&rdquo; below. Prepared schema work for arbitrary page types is a later phase; queuing this page alone does not create that work automatically.
-                  </p>
-                ) : (
-                  <p className="text-tiny text-muted" style={{ margin: '0 0 12px' }}>
-                    No actionable gap -- every genuinely-applicable check for this page type either passed or doesn&rsquo;t apply here. This page is marked No action needed and will not appear in future recommendation batches.
-                  </p>
-                )}
-
-                {analysis.missingOrInvalid.length > 0 && (
-                  <>
-                    <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Missing / invalid</div>
-                    <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
-                      {analysis.missingOrInvalid.map(c => <AnalysisListRow key={c.id} label={c.label} tone="bad" />)}
-                    </div>
-                  </>
-                )}
-                {analysis.applicable.filter(c => !analysis.missingOrInvalid.some(m => m.id === c.id)).length > 0 && (
-                  <>
-                    <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Applicable and passing</div>
-                    <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
-                      {analysis.applicable.filter(c => !analysis.missingOrInvalid.some(m => m.id === c.id)).map(c => <AnalysisListRow key={c.id} label={c.label} tone="good" />)}
-                    </div>
-                  </>
-                )}
-                {analysis.notApplicable.length > 0 && (
-                  <>
-                    <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Not applicable to this page type</div>
-                    <div style={{ display: 'grid', gap: 8 }}>
-                      {analysis.notApplicable.map(c => <AnalysisListRow key={c.id} label={c.label} tone="muted" />)}
-                    </div>
-                  </>
-                )}
+                <PageAnalysisResult analysis={analysis} />
               </div>
             )
           })() : pillar ? (() => {
