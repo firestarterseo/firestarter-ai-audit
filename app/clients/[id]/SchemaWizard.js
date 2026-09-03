@@ -852,8 +852,22 @@ export default function SchemaWizard({ pillar, clientId, client }) {
     const dossier = all.find(d => d.path === path)
     setPreparingPaths(prev => new Set(prev).add(path))
     clearPreparedWorkError(path)
+    const donePreparingPath = () => setPreparingPaths(prev => {
+      const next = new Set(prev)
+      next.delete(path)
+      return next
+    })
+
+    // Step 1: the actual network call. ONLY a failure HERE -- fetch()
+    // itself never resolving to a response at all (offline, DNS failure,
+    // CORS, the app genuinely unreachable) -- is a real "could not reach
+    // the server" condition. See app/api/clients/[id]/schema/prepare-work/
+    // route.js's logAndClassify() for why every other failure mode (a
+    // real 4xx/5xx, or a response whose body isn't valid JSON because the
+    // server threw before returning one) must never be reported this way.
+    let res
     try {
-      const res = await fetch(`/api/clients/${clientId}/schema/prepare-work`, {
+      res = await fetch(`/api/clients/${clientId}/schema/prepare-work`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -865,26 +879,38 @@ export default function SchemaWizard({ pillar, clientId, client }) {
           } : undefined
         })
       })
-      const body = await res.json()
-      if (!res.ok) {
-        setPreparedWorkErrors(prev => new Map(prev).set(path, body?.error || `Request failed (HTTP ${res.status}).`))
-        return
-      }
-      setPreparedWorkByPath(prev => new Map(prev).set(path, { opportunity: body.opportunity, preparedWork: body.preparedWork || [] }))
-      // The route re-diagnosed this page live to establish eligibility --
-      // fold that fresh diagnosis back into pageAnalyses so the "What's
-      // missing" view never shows a diagnosis older than the prepared
-      // work it's sitting next to.
-      if (body.analysis) setPageAnalyses(prev => new Map(prev).set(path, body.analysis))
     } catch (e) {
       setPreparedWorkErrors(prev => new Map(prev).set(path, 'Could not reach the server to prepare schema work.'))
-    } finally {
-      setPreparingPaths(prev => {
-        const next = new Set(prev)
-        next.delete(path)
-        return next
-      })
+      donePreparingPath()
+      return
     }
+
+    // Step 2: the server responded with a real HTTP status -- parse its
+    // body separately. If THIS throws, the server was reached and ran,
+    // but crashed before returning valid JSON (an uncaught exception) --
+    // that is a server error, not a connectivity problem, and must be
+    // reported as such rather than falling into the network-error message.
+    let body
+    try {
+      body = await res.json()
+    } catch (e) {
+      setPreparedWorkErrors(prev => new Map(prev).set(path, `The server returned an unexpected response (HTTP ${res.status}) while preparing schema work. This is a server error, not a connectivity problem -- please try again, and report this if it keeps happening.`))
+      donePreparingPath()
+      return
+    }
+
+    if (!res.ok) {
+      setPreparedWorkErrors(prev => new Map(prev).set(path, body?.error || `Request failed (HTTP ${res.status}).`))
+      donePreparingPath()
+      return
+    }
+    setPreparedWorkByPath(prev => new Map(prev).set(path, { opportunity: body.opportunity, preparedWork: body.preparedWork || [] }))
+    // The route re-diagnosed this page live to establish eligibility --
+    // fold that fresh diagnosis back into pageAnalyses so the "What's
+    // missing" view never shows a diagnosis older than the prepared
+    // work it's sitting next to.
+    if (body.analysis) setPageAnalyses(prev => new Map(prev).set(path, body.analysis))
+    donePreparingPath()
   }
 
   // runOpportunityLifecycleAction(path, opportunityId, action, extra) --
@@ -1355,18 +1381,17 @@ export default function SchemaWizard({ pillar, clientId, client }) {
           )}
           <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(2)}>&larr; Pick a different page</button>
-            {isHomeOpen ? (
+            {isHomeOpen && (
               <button className="btn btn-primary" onClick={() => setStep(4)}>Fix with the generator &rarr;</button>
-            ) : (
-              // PRODUCT DECISION #10: "Do not create a Phase 3 opportunity
-              // merely because the page was queued." The Schema Generator
-              // (steps 4-6) is homepage/business-entity-specific; prepared
-              // schema work for an arbitrary page type's real gap is an
-              // explicitly later phase, not fabricated here.
-              <button className="btn btn-secondary" disabled title="Prepared schema work for this page is a later phase -- not built yet.">
-                Prepared schema work &mdash; not built yet
-              </button>
             )}
+            {/* PRODUCT DECISION #10 originally left a disabled "Prepared
+                schema work -- not built yet" button here for non-homepage
+                pages. That phase is now built: the PreparedWorkPanel
+                rendered above (Phase 6, 2026-09-03) already owns the
+                entire Prepare/Approve/Edit/Reject flow for this page, so
+                this footer intentionally shows no second, competing
+                Prepare Schema Work control -- see Section 18 of the
+                2026-09 persistence/integration debugging pass. */}
           </div>
         </div>
       )}

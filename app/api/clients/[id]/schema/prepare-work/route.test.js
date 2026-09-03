@@ -20,6 +20,12 @@ const routePath = require.resolve(path.join(__dirname, 'route'))
 // clients (POST) and opportunities (POST's final read + GET).
 // ---------------------------------------------------------------------
 let tables = { clients: [], opportunities: [] }
+// forceThrowForTable -- lets a test simulate a Supabase client call that
+// THROWS (e.g. a real connection error), distinct from one that resolves
+// with an {error} object (already covered by the `tables` fixtures above).
+// Reset in resetAll() so a forced failure from one test never leaks into
+// the next.
+let forceThrowForTable = null
 
 function makeTable(tableName) {
   return {
@@ -28,11 +34,13 @@ function makeTable(tableName) {
       const builder = {
         eq(k, v) { filters[k] = v; return builder },
         async single() {
+          if (forceThrowForTable && forceThrowForTable.table === tableName) throw forceThrowForTable.error
           const rows = tables[tableName] || []
           const match = rows.find(r => Object.entries(filters).every(([k, v]) => r[k] === v))
           return match ? { data: match, error: null } : { data: null, error: { message: `${tableName} row not found` } }
         },
         async maybeSingle() {
+          if (forceThrowForTable && forceThrowForTable.table === tableName) throw forceThrowForTable.error
           const rows = tables[tableName] || []
           const match = rows.find(r => Object.entries(filters).every(([k, v]) => r[k] === v))
           return { data: match || null, error: null }
@@ -107,6 +115,7 @@ const { POST, GET } = require(routePath)
 
 function resetAll() {
   tables = { clients: [{ id: 'client-1', url: 'https://example.com' }], opportunities: [{ id: 'opp-1', client_id: 'client-1', fingerprint: 'schema:/about', title: 'x' }] }
+  forceThrowForTable = null
   spies.analyzePage.reset(async () => ANALYSIS_ELIGIBLE)
   spies.resolvePageUrl.reset((siteUrl, p) => `${siteUrl}${p}`)
   spies.isEligibleForPreparedWork.reset((analysis) => analysis.finalStatus === 'ACTION_REQUIRED' || analysis.finalStatus === 'IMPROVEMENT_AVAILABLE')
@@ -268,6 +277,94 @@ async function testGetPathValidation() {
   log('TEST (GET requires a path query parameter) PASSED')
 }
 
+// ---------------------------------------------------------------------
+// 8-12. ERROR CLASSIFICATION -- 2026-09 persistence/integration debugging
+// pass, Section 4/21. A thrown exception at any stage of the ANALYZE ->
+// QUALIFY -> PREPARE -> SUBMIT-FOR-APPROVAL flow must come back as a real,
+// classified HTTP error (never an uncaught 500 the client can't parse, and
+// never something that could be mistaken client-side for "could not reach
+// the server" -- that message is reserved for an actual fetch()-level
+// network failure, which this server-side route can never produce itself).
+// ---------------------------------------------------------------------
+async function testAnalyzeFailureIsClassifiedAsPreparationFailedNotPersistence() {
+  resetAll()
+  spies.analyzePage.reset(async () => { throw Object.assign(new Error('site timed out'), { code: 'ETIMEDOUT' }) })
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status, 502)
+  const body = await res.json()
+  assert.strictEqual(body.errorClass, 'preparation_failed')
+  assert.strictEqual(body.phase, 'analyze')
+  assert.strictEqual(body.code, 'ETIMEDOUT')
+  assert.ok(!JSON.stringify(body).includes('site timed out'), 'the raw error message must never be echoed to the client')
+  assert.strictEqual(spies.qualifySchemaPageOpportunity.calls.length, 0, 'a failed analysis must never reach qualify')
+  log('TEST (an analyzePage exception is a 502 preparation_failed error, not a generic 500 or a network-error-shaped response) PASSED')
+}
+
+async function testQualifyFailureIsClassifiedAsPersistenceAndPreservesAnalysis() {
+  resetAll()
+  spies.qualifySchemaPageOpportunity.reset(async () => { throw Object.assign(new Error('column "originating_pillar" of relation "opportunities" does not exist'), { code: '42703' }) })
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status, 500)
+  const body = await res.json()
+  assert.strictEqual(body.errorClass, 'persistence')
+  assert.strictEqual(body.phase, 'qualify')
+  assert.strictEqual(body.code, '42703')
+  assert.ok(body.analysis, 'the diagnosis that already succeeded must still be returned to the client')
+  assert.ok(!JSON.stringify(body).includes('does not exist'), 'the raw Postgres error message must never be echoed to the client')
+  assert.strictEqual(spies.buildPreparedSchemaWork.calls.length, 0, 'a failed qualify must never reach prepare')
+  log('TEST (a qualifySchemaPageOpportunity exception -- e.g. a real Postgres 42703 -- is a 500 persistence error with the diagnosis preserved and no raw DB message leaked) PASSED')
+}
+
+async function testBuildPreparedWorkFailureIsClassifiedAsPreparationFailed() {
+  resetAll()
+  spies.buildPreparedSchemaWork.reset(async () => { throw new Error('unexpected page shape') })
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status, 500)
+  const body = await res.json()
+  assert.strictEqual(body.errorClass, 'preparation_failed')
+  assert.strictEqual(body.phase, 'build_prepared_work')
+  assert.strictEqual(body.opportunityId, 'opp-1', 'the opportunity was already durably qualified before this step failed, and that must be visible to the client')
+  assert.strictEqual(spies.prepareWork.calls.length, 0)
+  log('TEST (a buildPreparedSchemaWork exception is a preparation_failed error that still reports the already-saved opportunityId) PASSED')
+}
+
+async function testPrepareWorkFailureIsClassifiedAsPersistence() {
+  resetAll()
+  spies.prepareWork.reset(async () => { throw Object.assign(new Error('relation "opportunity_prepared_work" does not exist'), { code: '42P01' }) })
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status, 500)
+  const body = await res.json()
+  assert.strictEqual(body.errorClass, 'persistence')
+  assert.strictEqual(body.phase, 'prepare_work')
+  assert.strictEqual(body.code, '42P01')
+  assert.strictEqual(spies.submitForApproval.calls.length, 0)
+  log('TEST (a prepareWork exception -- e.g. a missing opportunity_prepared_work table -- is a 500 persistence error, never surfaced as a network failure) PASSED')
+}
+
+async function testFinalReadFailureIsClassifiedAsPersistence() {
+  resetAll()
+  tables.opportunities = [] // .single() on the post-write read now finds nothing -> its own {error} path
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status, 500)
+  const body = await res.json()
+  assert.strictEqual(body.errorClass, 'persistence')
+  assert.strictEqual(body.phase, 'final_read')
+  log('TEST (a failure reading back the just-written opportunity is a 500 persistence error, not a silent 200 or an uncaught exception) PASSED')
+}
+
+async function testGetFailureIsClassifiedAsPersistenceNotLeakingRawError() {
+  resetAll()
+  forceThrowForTable = { table: 'opportunities', error: Object.assign(new Error('connection reset'), { code: 'ECONNRESET' }) }
+  const res = await GET(getReq({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status, 500)
+  const body = await res.json()
+  assert.strictEqual(body.errorClass, 'persistence')
+  assert.strictEqual(body.phase, 'get_read')
+  assert.strictEqual(body.code, 'ECONNRESET')
+  assert.ok(!JSON.stringify(body).includes('connection reset'))
+  log('TEST (GET surfaces a thrown Supabase error as a classified 500 persistence error, never a raw uncaught exception) PASSED')
+}
+
 async function main() {
   await testPathValidation()
   await testClientLookup()
@@ -278,6 +375,12 @@ async function main() {
   await testGetReturnsExistingOpportunityWithoutRefetching()
   await testGetReturnsNullForANeverPreparedPage()
   await testGetPathValidation()
+  await testAnalyzeFailureIsClassifiedAsPreparationFailedNotPersistence()
+  await testQualifyFailureIsClassifiedAsPersistenceAndPreservesAnalysis()
+  await testBuildPreparedWorkFailureIsClassifiedAsPreparationFailed()
+  await testPrepareWorkFailureIsClassifiedAsPersistence()
+  await testFinalReadFailureIsClassifiedAsPersistence()
+  await testGetFailureIsClassifiedAsPersistenceNotLeakingRawError()
   log('\nAll Phase 6 schema/prepare-work route tests passed (mocked dependencies + Supabase, no DB or network required).')
 }
 
