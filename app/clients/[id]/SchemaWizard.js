@@ -324,22 +324,49 @@ function PageRow({ dossier, isOpen, isQueued, onOpen, onToggleQueue, showRecomme
   )
 }
 
-// PageAnalysisResult -- PRODUCT DECISION (2026-09-02 PAGE ANALYSIS RESULT
-// UX pass): renders the FULL diagnostic breakdown for one analyzed page --
-// the real current schema detected, an ordered PASS/FAIL check list (each
-// with a short, data-derived evidence sentence -- see
-// lib/schemaPageTypeChecks.js's `evidence` fields), a separate "not
-// applicable" list (explicitly never counted as a failure), and a final
-// conclusion line. Shared between the Schema work queue's inline expansion
-// and Step 3's "What's missing" view for a non-homepage page, so a page's
-// diagnostic result reads identically wherever an AM looks at it.
-//
-// This directly answers the live-validation finding that a queued page
-// showing only "NO ACTION NEEDED / RE-ANALYZE PAGE" was not enough: "MAKE
-// 'NO ACTION NEEDED' A CONCLUSION, NOT THE ENTIRE RESULT... DO NOT HIDE
-// PASSING PAGES' ANALYSIS." Every applicable check -- pass or fail -- is
-// always rendered here; the conclusion line is the LAST thing shown, never
-// the only thing shown.
+// FINAL_STATUS_COPY -- DIAGNOSTIC METHODOLOGY pass (2026-09-03). Plain-
+// language label + tone per lib/schemaPageTypeChecks.js's four-value
+// finalStatus. Deliberately no ranking-impact claim anywhere here (per the
+// approved methodology's rule #12: never claim schema will improve
+// rankings) -- these describe what the diagnosis found, not what adding
+// schema will do for the page.
+const FINAL_STATUS_COPY = {
+  ACTION_REQUIRED: { label: 'Action required', tone: 'issue-critical' },
+  IMPROVEMENT_AVAILABLE: { label: 'Improvement available', tone: 'issue-minor' },
+  NO_ACTION_NEEDED: { label: 'No action needed', tone: 'issue-passing' },
+  COULD_NOT_VERIFY: { label: 'Could not verify', tone: 'issue-minor' }
+}
+
+// CheckList -- shared renderer for a tier's check entries (Core or
+// Recommended), each already carrying its own real, data-derived evidence
+// sentence from lib/schemaPageTypeChecks.js.
+function CheckList({ checks }) {
+  if (checks.length === 0) return null
+  return (
+    <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
+      {checks.map(c => (
+        <div className="issue-item" key={c.id}>
+          <span className={`issue-badge ${c.status === 'pass' ? 'issue-passing' : 'issue-critical'}`}>
+            {c.status === 'pass' ? 'Pass' : 'Fail'}
+          </span>
+          <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{c.label}</div>
+          <p className="text-small issue-why">{c.evidence}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// PageAnalysisResult -- DIAGNOSTIC METHODOLOGY pass (2026-09-03), replacing
+// the flat applicable/missingOrInvalid/notApplicable/actionableGap shape
+// with the approved TARGET PROFILE / CORE / RECOMMENDED / AVOID / NOT
+// APPLICABLE / FINAL STATUS result model (lib/schemaPageTypeChecks.js).
+// Shared between the Schema work queue's inline expansion and Step 3's
+// detail view, so a page's diagnostic reads identically wherever an AM
+// looks at it. Every Core and Recommended check -- pass or fail -- is
+// always rendered; Final Status is the LAST thing shown, never the only
+// thing shown ("MAKE 'NO ACTION NEEDED' A CONCLUSION, NOT THE ENTIRE
+// RESULT," carried over unchanged from the prior UX pass).
 function PageAnalysisResult({ analysis }) {
   if (!analysis) return null
 
@@ -351,10 +378,13 @@ function PageAnalysisResult({ analysis }) {
     )
   }
 
+  const statusCopy = FINAL_STATUS_COPY[analysis.finalStatus] || { label: analysis.finalStatus, tone: 'issue-minor' }
+
   return (
     <div>
       <div className="grade-sub" style={{ marginBottom: 10 }}>
         Classification: {analysis.classification.type} (source: {analysis.classification.source}, confidence: {analysis.classification.confidence})
+        {analysis.targetProfile && <> &middot; Target profile: {analysis.targetProfile}</>}
       </div>
 
       <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 6px' }}>Current schema detected</div>
@@ -362,22 +392,33 @@ function PageAnalysisResult({ analysis }) {
         {analysis.currentSchema.length > 0 ? analysis.currentSchema.join(', ') : 'None found'}
       </p>
 
-      <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Checks</div>
-      <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
-        {analysis.applicable.map(c => (
-          <div className="issue-item" key={c.id}>
-            <span className={`issue-badge ${c.status === 'pass' ? 'issue-passing' : 'issue-critical'}`}>
-              {c.status === 'pass' ? 'Pass' : 'Fail'}
-            </span>
-            <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{c.label}</div>
-            <p className="text-small issue-why">{c.evidence}</p>
+      <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Core checks</div>
+      <CheckList checks={analysis.coreChecks} />
+
+      <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Recommended enhancements</div>
+      <CheckList checks={analysis.recommendedChecks} />
+      {analysis.recommendedChecks.length === 0 && (
+        <p className="text-tiny text-muted" style={{ margin: '0 0 16px' }}>No recommended enhancements tracked for this target profile.</p>
+      )}
+
+      {analysis.avoidFindings.length > 0 && (
+        <>
+          <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Avoid &mdash; flagged for review</div>
+          <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
+            {analysis.avoidFindings.map(f => (
+              <div className="issue-item" key={f.id}>
+                <span className="issue-badge issue-critical">Review</span>
+                <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{f.label}</div>
+                <p className="text-small issue-why">{f.evidence}</p>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
 
       {analysis.notApplicable.length > 0 && (
         <>
-          <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Not applicable to this page type</div>
+          <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 8px' }}>Not applicable to this target profile</div>
           <p className="text-tiny text-muted" style={{ margin: '0 0 16px' }}>
             {analysis.notApplicable.map(c => c.label).join(', ')} &mdash; not counted as failures.
           </p>
@@ -385,13 +426,11 @@ function PageAnalysisResult({ analysis }) {
       )}
 
       <div style={{ fontWeight: 600, fontSize: 13, margin: '4px 0 4px' }}>
-        Result: {analysis.actionableGap
-          ? `${analysis.missingOrInvalid.length} actionable schema gap${analysis.missingOrInvalid.length === 1 ? '' : 's'} found`
-          : 'No actionable schema gap found'}
+        Final status: <span className={`issue-badge ${statusCopy.tone}`}>{statusCopy.label}</span>
       </div>
-      {analysis.actionableGap && (
+      {analysis.targetProfile === 'LOCATION_UNCONFIRMED' && (
         <p className="text-tiny text-muted" style={{ margin: 0 }}>
-          Recommended next action: address {analysis.missingOrInvalid.map(c => c.label.toLowerCase()).join('; ')}.
+          This page&rsquo;s physical-location status (a real staffed office vs. a service-area landing page) is not yet confirmed &mdash; no LocalBusiness/address schema is recommended until that&rsquo;s established.
         </p>
       )}
     </div>
