@@ -496,9 +496,89 @@ function SchemaChangeList({ title, items, tone }) {
   )
 }
 
+// WordPressExecutionPanel -- Phase 7 (2026-09-04): DEPLOY TO WORDPRESS ->
+// VERIFY LIVE / RECHECK LIVE, rendered strictly AFTER approval, never as
+// part of the approve/reject step itself (approval must never auto-publish
+// -- see execute-work/route.js's own approval gate, which this UI mirrors
+// for display only and never substitutes for). GATED on
+// execution_capability === 'yellow' -- a RED (manual-only) or any other
+// opportunity renders nothing here at all, so this UI never implies
+// WordPress execution exists for a client that isn't actually connected
+// (instruction #18's explicit requirement).
+function WordPressExecutionPanel({ opportunity, isExecuting, isVerifying, error, onDeploy, onVerify }) {
+  if (!opportunity || opportunity.execution_capability !== 'yellow') return null
+  if (opportunity.approval_status !== 'approved' || !opportunity.approved_prepared_work_id) return null
+
+  const executionStatus = opportunity.execution_status || 'not_started'
+  const verificationStatus = opportunity.verification_status || 'not_ready'
+  const executionResult = (opportunity.execution_state && opportunity.execution_state.result) || null
+  const executed = executionStatus === 'executed' || executionStatus === 'human_completed'
+
+  return (
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed var(--border)' }}>
+      <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 6 }}>
+        WordPress execution
+      </div>
+
+      {error && <p className="text-small issue-why" style={{ marginBottom: 8 }}>{error}</p>}
+
+      {!executed && executionStatus !== 'execution_failed' && (
+        <>
+          <div style={{ margin: '0 0 8px' }}>
+            <span className="issue-badge issue-minor">APPROVED — READY FOR EXECUTION</span>
+          </div>
+          <button className="btn btn-primary" disabled={isExecuting} onClick={onDeploy}>
+            {isExecuting ? 'Deploying…' : 'Deploy to WordPress'}
+          </button>
+        </>
+      )}
+
+      {!executed && executionStatus === 'execution_failed' && (
+        <>
+          <div style={{ margin: '0 0 8px' }}>
+            <span className="issue-badge issue-critical">EXECUTION FAILED</span>
+          </div>
+          {executionResult?.error && <p className="text-small issue-why" style={{ marginBottom: 8 }}>{executionResult.error}</p>}
+          <button className="btn btn-primary" disabled={isExecuting} onClick={onDeploy}>
+            {isExecuting ? 'Retrying…' : 'Retry deploy to WordPress'}
+          </button>
+        </>
+      )}
+
+      {executed && (
+        <>
+          <div style={{ margin: '0 0 8px', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <span className="issue-badge issue-passing">DEPLOYED</span>
+            {verificationStatus === 'verified' && <span className="issue-badge issue-passing">VERIFIED LIVE</span>}
+            {verificationStatus === 'failed_verification' && <span className="issue-badge issue-critical">VERIFICATION FAILED</span>}
+            {verificationStatus === 'inconclusive' && <span className="issue-badge issue-minor">DEPLOYED — COULD NOT VERIFY</span>}
+            {(verificationStatus === 'not_ready' || verificationStatus === 'ready_to_verify') && <span className="issue-badge issue-minor">READY TO VERIFY</span>}
+          </div>
+          {executionResult?.deployedAt && (
+            <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
+              Deployed {new Date(executionResult.deployedAt).toLocaleString()}{executionResult.postId ? ` (WordPress post #${executionResult.postId})` : ''}.
+            </p>
+          )}
+          {isVerifying ? (
+            <button className="btn btn-secondary" disabled>Verifying live…</button>
+          ) : (verificationStatus === 'verified' || verificationStatus === 'failed_verification' || verificationStatus === 'inconclusive') ? (
+            <button className="btn btn-secondary" onClick={onVerify}>Recheck live</button>
+          ) : (
+            <button className="btn btn-primary" onClick={onVerify}>Verify live</button>
+          )}
+          <p className="text-tiny text-muted" style={{ margin: '8px 0 0' }}>
+            This only confirms whether the specific schema Firestarter deployed is still live on the page -- it is never a claim about ranking or AI-visibility impact.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
 function PreparedWorkPanel({
   path, analysis, prepared, isPreparing, isBusy, error, editingDraft,
-  onPrepare, onApprove, onStartEdit, onCancelEdit, onDraftChange, onSaveEdit, onReject
+  onPrepare, onApprove, onStartEdit, onCancelEdit, onDraftChange, onSaveEdit, onReject,
+  onDeploy, onVerify, isExecuting, isVerifying, executionError
 }) {
   const eligible = isEligibleForPreparedWorkDisplay(analysis)
   const opportunity = prepared?.opportunity
@@ -603,6 +683,15 @@ function PreparedWorkPanel({
               )}
             </div>
           )}
+
+          <WordPressExecutionPanel
+            opportunity={opportunity}
+            isExecuting={isExecuting}
+            isVerifying={isVerifying}
+            error={executionError}
+            onDeploy={onDeploy}
+            onVerify={onVerify}
+          />
         </div>
       )}
     </div>
@@ -687,6 +776,30 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   const [lifecycleBusyPaths, setLifecycleBusyPaths] = useState(() => new Set())
   const [preparedWorkErrors, setPreparedWorkErrors] = useState(() => new Map())
   const [editingDrafts, setEditingDrafts] = useState(() => new Map()) // path -> draft JSON text
+
+  // -------------------------------------------------------------------
+  // WordPress Schema execution + live verification state (Phase 7,
+  // 2026-09-04). Deliberately separate Sets/Maps from lifecycleBusyPaths/
+  // preparedWorkErrors above -- Deploy and Verify are their own distinct
+  // server calls (app/api/clients/[id]/schema/execute-work and
+  // .../verify-work), never routed through the shared opportunity
+  // lifecycle dispatcher, and a deploy-in-flight must never be confused
+  // with (or blocked by) an approve/reject click on a DIFFERENT page. No
+  // separate cache of "what got deployed" is kept here either -- exactly
+  // like preparedWorkByPath above, the real state
+  // (execution_status/execution_state/verification_status/
+  // verification_state) lives entirely in the opportunity row itself and
+  // is re-read via the existing refreshPreparedWork(path) after every
+  // Deploy/Verify call, never trusted from the POST response alone.
+  // executingPaths/verifyingPaths double as this action's UI-side
+  // double-click protection (the button itself is also disabled while
+  // true) -- execute-work/route.js's own idempotency check is the
+  // server-side backstop, per instruction #9's "double-click protection
+  // must exist both UI-side and server-side where practical."
+  // -------------------------------------------------------------------
+  const [executingPaths, setExecutingPaths] = useState(() => new Set())
+  const [verifyingPaths, setVerifyingPaths] = useState(() => new Set())
+  const [executionErrors, setExecutionErrors] = useState(() => new Map())
 
   // -------------------------------------------------------------------
   // Schema Batch Workflow state (Phase 6, 2026-09-04). `selectedPaths` is a
@@ -1293,6 +1406,64 @@ export default function SchemaWizard({ pillar, clientId, client }) {
     }
   }
 
+  // deploySchemaWork(path) -- the AM's explicit "Deploy to WordPress" click
+  // (Phase 7, instruction #5/#18). Calls the new, dedicated execute-work
+  // route -- NEVER the shared opportunity-lifecycle dispatcher those other
+  // actions above use, since this is a real external write with its own
+  // approval-gate/idempotency/transform logic entirely server-side (see
+  // that route's own header). Always refreshes the opportunity via the
+  // existing GET afterward, exactly like runOpportunityLifecycleAction
+  // does, rather than trusting this POST's own response shape for what to
+  // render next.
+  async function deploySchemaWork(path, opportunityId) {
+    if (executingPaths.has(path)) return // UI-side double-click protection
+    setExecutingPaths(prev => new Set(prev).add(path))
+    setExecutionErrors(prev => { if (!prev.has(path)) return prev; const next = new Map(prev); next.delete(path); return next })
+    try {
+      const res = await fetch(`/api/clients/${clientId}/schema/execute-work`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path })
+      })
+      const body = await res.json().catch(() => null)
+      if (!res.ok) {
+        setExecutionErrors(prev => new Map(prev).set(path, body?.error || `Deployment failed (HTTP ${res.status}).`))
+      }
+      await refreshPreparedWork(path)
+    } catch (e) {
+      setExecutionErrors(prev => new Map(prev).set(path, 'Could not reach the server.'))
+    } finally {
+      setExecutingPaths(prev => { const next = new Set(prev); next.delete(path); return next })
+    }
+  }
+
+  // verifySchemaWork(path) -- serves BOTH "Verify Live" (the first check
+  // after a deploy) and "Recheck Live" (instruction #14's manual re-check
+  // after, e.g., a cache/CDN propagation delay) -- the exact same server
+  // action either way (see verify-work/route.js's own header), so no
+  // separate handler or endpoint exists for "recheck."
+  async function verifySchemaWork(path, opportunityId) {
+    if (verifyingPaths.has(path)) return
+    setVerifyingPaths(prev => new Set(prev).add(path))
+    setExecutionErrors(prev => { if (!prev.has(path)) return prev; const next = new Map(prev); next.delete(path); return next })
+    try {
+      const res = await fetch(`/api/clients/${clientId}/schema/verify-work`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path })
+      })
+      const body = await res.json().catch(() => null)
+      if (!res.ok) {
+        setExecutionErrors(prev => new Map(prev).set(path, body?.error || `Live verification failed (HTTP ${res.status}).`))
+      }
+      await refreshPreparedWork(path)
+    } catch (e) {
+      setExecutionErrors(prev => new Map(prev).set(path, 'Could not reach the server.'))
+    } finally {
+      setVerifyingPaths(prev => { const next = new Set(prev); next.delete(path); return next })
+    }
+  }
+
   function startEditingPreparedWork(path, latestPayload) {
     setEditingDrafts(prev => new Map(prev).set(path, JSON.stringify({ add: latestPayload?.add || [], modify: latestPayload?.modify || [] }, null, 2)))
   }
@@ -1620,6 +1791,11 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                                     onDraftChange={(text) => setEditingDrafts(prev => new Map(prev).set(dossier.path, text))}
                                     onSaveEdit={(latest) => saveEditedPreparedWork(dossier.path, prepared?.opportunity?.id, latest)}
                                     onReject={() => rejectPreparedWork(dossier.path, prepared?.opportunity?.id)}
+                                    onDeploy={() => deploySchemaWork(dossier.path, prepared?.opportunity?.id)}
+                                    onVerify={() => verifySchemaWork(dossier.path, prepared?.opportunity?.id)}
+                                    isExecuting={executingPaths.has(dossier.path)}
+                                    isVerifying={verifyingPaths.has(dossier.path)}
+                                    executionError={executionErrors.get(dossier.path)}
                                   />
                                 </div>
                               )}
@@ -1772,6 +1948,11 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                   onDraftChange={(text) => setEditingDrafts(prev => new Map(prev).set(effectiveOpenPath, text))}
                   onSaveEdit={(latest) => saveEditedPreparedWork(effectiveOpenPath, preparedWorkByPath.get(effectiveOpenPath)?.opportunity?.id, latest)}
                   onReject={() => rejectPreparedWork(effectiveOpenPath, preparedWorkByPath.get(effectiveOpenPath)?.opportunity?.id)}
+                  onDeploy={() => deploySchemaWork(effectiveOpenPath, preparedWorkByPath.get(effectiveOpenPath)?.opportunity?.id)}
+                  onVerify={() => verifySchemaWork(effectiveOpenPath, preparedWorkByPath.get(effectiveOpenPath)?.opportunity?.id)}
+                  isExecuting={executingPaths.has(effectiveOpenPath)}
+                  isVerifying={verifyingPaths.has(effectiveOpenPath)}
+                  executionError={executionErrors.get(effectiveOpenPath)}
                 />
               </div>
             )

@@ -2,7 +2,7 @@ const { getSupabaseServerClient } = require('../../../../../../lib/supabaseServe
 const { analyzePage, resolvePageUrl } = require('../../../../../../lib/pageAnalysis')
 const { isEligibleForPreparedWork, qualifySchemaPageOpportunity, buildSchemaOpportunityFingerprint } = require('../../../../../../lib/schemaOpportunity')
 const { buildPreparedSchemaWork } = require('../../../../../../lib/schemaPreparedWork')
-const { prepareWork, submitForApproval, getPreparedWork, getOpportunityHistory } = require('../../../../../../lib/opportunityLifecycle')
+const { prepareWork, submitForApproval, getPreparedWork, getOpportunityHistory, setPriorityTreatment } = require('../../../../../../lib/opportunityLifecycle')
 const { upsertAnalysisResult, linkOpportunity } = require('../../../../../../lib/schemaPageWork')
 
 // Live page fetch (twice -- see lib/schemaPreparedWork.js's own header on
@@ -28,11 +28,16 @@ const maxDuration = 30
 // never reach this far), (2) a durable `opportunity_prepared_work` row via
 // that same lifecycle's prepareWork(), and (3) approval_status: 'pending'
 // via submitForApproval() -- ONLY when preparation actually produced a
-// real, content-defensible proposal (see below). execution_capability is
-// always 'red' (set inside lib/schemaOpportunity.js) -- this route never
-// sets yellow/green and never calls executeOpportunity/requestHandoff/
-// requestVerification/recordVerification. Never touches WordPress, never
-// publishes anything.
+// real, content-defensible proposal (see below). A brand new opportunity is
+// always first qualified 'red' (set inside lib/schemaOpportunity.js, which
+// has no access to live WordPress-connection state); this route's own
+// EXECUTION CAPABILITY SYNC block below (Phase 7, 2026-09-04) reconciles an
+// EXISTING opportunity's capability to 'yellow'/'red' against the client's
+// real, current WordPress-connection state via the existing
+// setPriorityTreatment() primitive. This route still never calls
+// executeOpportunity/requestHandoff/requestVerification/recordVerification,
+// and never talks to WordPress itself -- the actual deploy/verify calls
+// live in execute-work/route.js and verify-work/route.js.
 async function POST(request, { params }) {
   const { id } = await params
   let body
@@ -50,7 +55,7 @@ async function POST(request, { params }) {
   const supabase = getSupabaseServerClient()
   let client
   try {
-    const { data, error: clientError } = await supabase.from('clients').select('url').eq('id', id).single()
+    const { data, error: clientError } = await supabase.from('clients').select('url, wp_username, wp_app_password_encrypted').eq('id', id).single()
     if (clientError) return Response.json({ error: clientError.message, errorClass: 'validation' }, { status: 404 })
     client = data
   } catch (e) {
@@ -106,6 +111,35 @@ async function POST(request, { params }) {
     return Response.json({ error: 'Eligibility check failed unexpectedly.', errorClass: 'validation', analysis }, { status: 400 })
   }
   const { opportunityId } = qualifyResult
+
+  // EXECUTION CAPABILITY SYNC (Phase 7, 2026-09-04) -- "Execution
+  // capability must reflect reality... do not simply relabel all Schema
+  // opportunities GREEN [and] only upgrade an individual execution path
+  // when capability is actually implemented." lib/schemaOpportunity.js
+  // always qualifies a BRAND NEW opportunity as RED (it has no access to
+  // this client's live WordPress-connection state, by design -- see that
+  // file's own header). This is the one place that reconciles an
+  // opportunity's capability against the CURRENT, real fact of whether
+  // this client has WordPress connected: YELLOW (automated execution is
+  // possible, but still gated on AM approval -- see
+  // lib/opportunityLifecycle.js#validateExecutionGate) when connected,
+  // RED (manual only) when not -- in BOTH directions, so disconnecting
+  // WordPress after the fact correctly downgrades capability again rather
+  // than leaving a stale, no-longer-true YELLOW behind. Uses the existing,
+  // already-tested setPriorityTreatment() primitive -- no second
+  // execution_capability write path is introduced. Best-effort: a failure
+  // here never blocks preparation itself, since the opportunity above is
+  // already durably saved regardless of what happens next.
+  try {
+    const wpConnected = !!(client.wp_username && client.wp_app_password_encrypted)
+    const desiredCapability = wpConnected ? 'yellow' : 'red'
+    const { data: currentOpportunity } = await supabase.from('opportunities').select('execution_capability').eq('id', opportunityId).single()
+    if (currentOpportunity && currentOpportunity.execution_capability !== desiredCapability) {
+      await setPriorityTreatment(opportunityId, { executionCapability: desiredCapability, actor: 'system' })
+    }
+  } catch (e) {
+    console.error('[schema/prepare-work] execution-capability sync failed:', e)
+  }
 
   // PAGE-WORK PERSISTENCE (Phase 5, 2026-09) -- best-effort/non-fatal. By
   // this point the real Phase 3 artifact (the opportunity) is already

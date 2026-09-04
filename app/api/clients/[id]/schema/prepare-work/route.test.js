@@ -105,20 +105,32 @@ const spies = {
   getPreparedWork: makeSpy(async () => ([{ id: 'pw-1', version: 1, status: 'ready_for_review' }])),
   getOpportunityHistory: makeSpy(async () => ([])),
   upsertAnalysisResult: makeSpy(async () => ({ id: 'pw-row-1' })),
-  linkOpportunity: makeSpy(async () => ({ id: 'pw-row-1', opportunity_id: 'opp-1' }))
+  linkOpportunity: makeSpy(async () => ({ id: 'pw-row-1', opportunity_id: 'opp-1' })),
+  // Phase 7 (2026-09-04) -- the EXECUTION CAPABILITY SYNC block's one write
+  // primitive. Default fixtures below keep the opportunity's
+  // execution_capability already matching what the (disconnected) default
+  // client fixture implies, so most existing tests never trigger a call --
+  // only the dedicated capability-sync tests further down flip one side of
+  // that match to exercise it.
+  setPriorityTreatment: makeSpy(async () => ({ opportunityId: 'opp-1', treatment: null, priorityAssessment: {} }))
 }
 
 require.cache[supabaseServerPath] = { id: supabaseServerPath, filename: supabaseServerPath, loaded: true, exports: { getSupabaseServerClient: () => fakeSupabase() } }
 require.cache[pageAnalysisPath] = { id: pageAnalysisPath, filename: pageAnalysisPath, loaded: true, exports: { analyzePage: spies.analyzePage, resolvePageUrl: spies.resolvePageUrl } }
 require.cache[schemaOpportunityPath] = { id: schemaOpportunityPath, filename: schemaOpportunityPath, loaded: true, exports: { isEligibleForPreparedWork: spies.isEligibleForPreparedWork, qualifySchemaPageOpportunity: spies.qualifySchemaPageOpportunity, buildSchemaOpportunityFingerprint: spies.buildSchemaOpportunityFingerprint } }
 require.cache[schemaPreparedWorkPath] = { id: schemaPreparedWorkPath, filename: schemaPreparedWorkPath, loaded: true, exports: { buildPreparedSchemaWork: spies.buildPreparedSchemaWork } }
-require.cache[opportunityLifecyclePath] = { id: opportunityLifecyclePath, filename: opportunityLifecyclePath, loaded: true, exports: { prepareWork: spies.prepareWork, submitForApproval: spies.submitForApproval, getPreparedWork: spies.getPreparedWork, getOpportunityHistory: spies.getOpportunityHistory } }
+require.cache[opportunityLifecyclePath] = { id: opportunityLifecyclePath, filename: opportunityLifecyclePath, loaded: true, exports: { prepareWork: spies.prepareWork, submitForApproval: spies.submitForApproval, getPreparedWork: spies.getPreparedWork, getOpportunityHistory: spies.getOpportunityHistory, setPriorityTreatment: spies.setPriorityTreatment } }
 require.cache[schemaPageWorkPath] = { id: schemaPageWorkPath, filename: schemaPageWorkPath, loaded: true, exports: { upsertAnalysisResult: spies.upsertAnalysisResult, linkOpportunity: spies.linkOpportunity } }
 
 const { POST, GET } = require(routePath)
 
 function resetAll() {
-  tables = { clients: [{ id: 'client-1', url: 'https://example.com' }], opportunities: [{ id: 'opp-1', client_id: 'client-1', fingerprint: 'schema:/about', title: 'x' }] }
+  // execution_capability: 'red' matches this default client fixture (no
+  // wp_username/wp_app_password_encrypted) so the Phase 7 capability-sync
+  // block is a no-op by default -- existing tests below never see a
+  // surprise setPriorityTreatment call unless they deliberately mismatch
+  // the two, as the dedicated capability-sync tests do.
+  tables = { clients: [{ id: 'client-1', url: 'https://example.com' }], opportunities: [{ id: 'opp-1', client_id: 'client-1', fingerprint: 'schema:/about', title: 'x', execution_capability: 'red' }] }
   forceThrowForTable = null
   spies.analyzePage.reset(async () => ANALYSIS_ELIGIBLE)
   spies.resolvePageUrl.reset((siteUrl, p) => `${siteUrl}${p}`)
@@ -132,6 +144,7 @@ function resetAll() {
   spies.getOpportunityHistory.reset(async () => ([]))
   spies.upsertAnalysisResult.reset(async () => ({ id: 'pw-row-1' }))
   spies.linkOpportunity.reset(async () => ({ id: 'pw-row-1', opportunity_id: 'opp-1' }))
+  spies.setPriorityTreatment.reset(async () => ({ opportunityId: 'opp-1', treatment: null, priorityAssessment: {} }))
 }
 
 function req(body) { return { json: async () => body } }
@@ -253,6 +266,60 @@ async function testPreparationFailedNeverSubmittedForApproval() {
 }
 
 // ---------------------------------------------------------------------
+// 5b-5d. EXECUTION CAPABILITY SYNC (Phase 7, 2026-09-04) -- reconciles an
+// EXISTING opportunity's execution_capability against the client's real,
+// current WordPress-connection state, in both directions, via the
+// existing setPriorityTreatment() primitive -- and is a true no-op (no
+// write at all) when the two already agree, so it never generates a noisy
+// duplicate history event on every single "Prepare Schema Work" click.
+// ---------------------------------------------------------------------
+async function testCapabilitySyncUpgradesRedToYellowWhenWordPressConnected() {
+  resetAll()
+  tables.clients = [{ id: 'client-1', url: 'https://example.com', wp_username: 'am', wp_app_password_encrypted: 'enc:abc' }]
+  // opp-1's fixture execution_capability stays 'red' (resetAll's default) --
+  // deliberately mismatched against this now-WordPress-connected client.
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200)
+  assert.strictEqual(spies.setPriorityTreatment.calls.length, 1, 'a newly-connected client must upgrade a RED opportunity to YELLOW')
+  assert.strictEqual(spies.setPriorityTreatment.calls[0][0], 'opp-1')
+  assert.strictEqual(spies.setPriorityTreatment.calls[0][1].executionCapability, 'yellow')
+  assert.strictEqual(spies.setPriorityTreatment.calls[0][1].actor, 'system')
+  log('TEST (a WordPress-connected client upgrades an existing RED opportunity to YELLOW via setPriorityTreatment) PASSED')
+}
+
+async function testCapabilitySyncDowngradesYellowToRedWhenWordPressDisconnected() {
+  resetAll()
+  tables.opportunities = [{ id: 'opp-1', client_id: 'client-1', fingerprint: 'schema:/about', title: 'x', execution_capability: 'yellow' }]
+  // Default client fixture (resetAll) has no wp_username/wp_app_password_encrypted --
+  // deliberately mismatched against this already-YELLOW opportunity.
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200)
+  assert.strictEqual(spies.setPriorityTreatment.calls.length, 1, 'a disconnected client must downgrade a stale YELLOW opportunity back to RED')
+  assert.strictEqual(spies.setPriorityTreatment.calls[0][0], 'opp-1')
+  assert.strictEqual(spies.setPriorityTreatment.calls[0][1].executionCapability, 'red')
+  log('TEST (a WordPress-disconnected client downgrades an existing YELLOW opportunity back to RED via setPriorityTreatment -- capability never left stale) PASSED')
+}
+
+async function testCapabilitySyncIsNoopWhenAlreadyMatching() {
+  resetAll() // default: client disconnected, opportunity already 'red' -- already in agreement
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200)
+  assert.strictEqual(spies.setPriorityTreatment.calls.length, 0, 'capability already matching reality must never trigger a write or a history event')
+  log('TEST (execution_capability already matching the client\'s real WordPress-connection state triggers no setPriorityTreatment call -- no noisy no-op history event) PASSED')
+}
+
+async function testCapabilitySyncFailureIsNonFatal() {
+  resetAll()
+  tables.clients = [{ id: 'client-1', url: 'https://example.com', wp_username: 'am', wp_app_password_encrypted: 'enc:abc' }]
+  spies.setPriorityTreatment.reset(async () => { throw new Error('opportunity was concurrently modified') })
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200, 'a capability-sync failure must never fail the overall Prepare Schema Work response -- it is best-effort only')
+  const body = await res.json()
+  assert.strictEqual(body.opportunity.id, 'opp-1', 'the real Phase 3 opportunity/prepared-work flow must still complete and be returned')
+  log('TEST (a setPriorityTreatment failure during capability sync is swallowed and never fails the overall prepare-work response) PASSED')
+}
+
+// ---------------------------------------------------------------------
 // 6. This route never calls WordPress publish / execution / verification
 //    primitives -- structural check that they are not even imported.
 // ---------------------------------------------------------------------
@@ -269,12 +336,16 @@ async function testNeverCallsExecutionOrVerificationOrPublish() {
   const destructureMatch = source.match(/const \{([^}]+)\}\s*=\s*require\('\.\.\/\.\.\/\.\.\/\.\.\/\.\.\/\.\.\/lib\/opportunityLifecycle'\)/)
   assert.ok(destructureMatch, 'expected a destructured require of opportunityLifecycle')
   const imported = destructureMatch[1].split(',').map(s => s.trim())
-  assert.deepStrictEqual(imported.sort(), ['getOpportunityHistory', 'getPreparedWork', 'prepareWork', 'submitForApproval'].sort())
+  // Phase 7 (2026-09-04): setPriorityTreatment joined this list -- it's the
+  // one EXISTING lifecycle primitive the new execution-capability-sync
+  // block reuses (never a new write path of its own). Every actual
+  // execution/handoff/verification/retest primitive remains absent below.
+  assert.deepStrictEqual(imported.sort(), ['getOpportunityHistory', 'getPreparedWork', 'prepareWork', 'submitForApproval', 'setPriorityTreatment'].sort())
   for (const forbidden of ['executeOpportunity', 'requestHandoff', 'recordHandoff', 'recordHumanCompleted', 'requestVerification', 'recordVerification', 'requestRetest', 'recordRetestResult']) {
     assert.ok(!imported.includes(forbidden), `route.js must never import ${forbidden}`)
   }
   assert.ok(!/require\([^)]*wordpress[^)]*\)/i.test(source), 'route.js must never require a WordPress/publish module')
-  log('TEST (route.js only imports prepareWork/submitForApproval/getPreparedWork/getOpportunityHistory -- execution/handoff/verification/retest primitives are never even imported, and no WordPress module is required) PASSED')
+  log('TEST (route.js only imports prepareWork/submitForApproval/getPreparedWork/getOpportunityHistory/setPriorityTreatment -- execution/handoff/verification/retest primitives are never even imported, and no WordPress module is required) PASSED')
 }
 
 // ---------------------------------------------------------------------
@@ -404,6 +475,10 @@ async function main() {
   await testEligibleAnalysisRunsFullFlow()
   await testPageWorkPersistenceFailureIsNonFatal()
   await testPreparationFailedNeverSubmittedForApproval()
+  await testCapabilitySyncUpgradesRedToYellowWhenWordPressConnected()
+  await testCapabilitySyncDowngradesYellowToRedWhenWordPressDisconnected()
+  await testCapabilitySyncIsNoopWhenAlreadyMatching()
+  await testCapabilitySyncFailureIsNonFatal()
   await testNeverCallsExecutionOrVerificationOrPublish()
   await testGetReturnsExistingOpportunityWithoutRefetching()
   await testGetReturnsNullForANeverPreparedPage()
