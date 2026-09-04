@@ -7,6 +7,15 @@ import { computeRecommendedSet } from '../../../lib/schemaPagePriority'
 import { toggleQueuedPath, resolveOpenPath } from '../../../lib/schemaPageSelection'
 import { deriveHomepageState, deriveStateFromAnalysis, excludedPathsFromStates, getPageState } from '../../../lib/schemaPageLifecycle'
 import { mergeDurableQueuedPaths, mergeDurableAnalyses } from '../../../lib/schemaPageHydration'
+import { runWithBoundedConcurrency } from '../../../lib/schemaBatchAnalysis'
+
+// BATCH_CONCURRENCY -- Phase 6 (2026-09-04): how many "Analyze Selected" /
+// "Prepare Selected" network calls run at once. Bounded deliberately -- an
+// AM selecting, say, 40 queued pages must never fire 40 simultaneous
+// live-site fetches (or 40 simultaneous LLM-backed prepare-work calls) at
+// once. 3 mirrors this codebase's other bounded-concurrency choices for
+// live external calls (see lib/serpLandscape.js's own Cloro-call batching).
+const BATCH_CONCURRENCY = 3
 
 // RECOMMENDATION_BATCH_SIZE -- PRODUCT DECISION #2: "RECOMMENDATIONS SHOULD
 // COME IN BATCHES OF 10... This is: NEXT BEST 10, not: TOP 10 FOREVER."
@@ -679,6 +688,22 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   const [preparedWorkErrors, setPreparedWorkErrors] = useState(() => new Map())
   const [editingDrafts, setEditingDrafts] = useState(() => new Map()) // path -> draft JSON text
 
+  // -------------------------------------------------------------------
+  // Schema Batch Workflow state (Phase 6, 2026-09-04). `selectedPaths` is a
+  // NEW, purely client-side, NEVER-persisted selection layer -- fully
+  // independent of the durable `queuedPaths` above (Section 3's SELECTION
+  // MODEL: selecting a page for a batch action is not the same fact as
+  // queuing it, and must never be confused with or survive as durable
+  // state). It is pruned whenever a path leaves the queue (see
+  // toggleQueued below) since a batch action should never silently target
+  // a page an AM just removed from schema work.
+  // -------------------------------------------------------------------
+  const [selectedPaths, setSelectedPaths] = useState(() => new Set())
+  const [isBatchAnalyzing, setIsBatchAnalyzing] = useState(false)
+  const [batchAnalysisSummary, setBatchAnalysisSummary] = useState(null) // { total, succeeded, failedPaths } | null
+  const [isBatchPreparing, setIsBatchPreparing] = useState(false)
+  const [batchPrepareSummary, setBatchPrepareSummary] = useState(null) // { total, succeeded, failedPaths } | null
+
   // Best-effort fetch of this client's AM-CONFIRMED profile fields (reuses
   // the existing GET /api/clients/[id]/profile-fields route -- no new
   // Supabase code, no new route, nothing added to what already exists).
@@ -820,26 +845,47 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   // homepage's REAL discovered path, never a hardcoded '/' literal.
   const isHomeOpen = !!homepageEntry && effectiveOpenPath === homepageEntry.path
 
+  // queuedDossiers -- PHASE 6 (2026-09-04): hoisted out of Step 2's JSX
+  // (where it used to be computed inline, once per render, only reachable
+  // from that one spot) so the new multi-page selection/batch-analysis
+  // logic below can reference the same list without duplicating the
+  // filter or risking it drifting out of sync with the queue the AM
+  // actually sees.
+  const queuedDossiers = useMemo(() => all.filter(d => queuedPaths.has(d.path)), [all, queuedPaths])
+
   // Best-effort, read-only load of any Schema prepared work that already
-  // exists for the currently open page (e.g. from an earlier visit this
-  // session, or another AM) -- calls the prepare-work route's GET branch
-  // ONLY (never POST: this never fetches the client's live site, never
-  // qualifies, never generates anything). Skips entirely once this path is
+  // exists for a page -- calls the prepare-work route's GET branch ONLY
+  // (never POST: this never fetches the client's live site, never
+  // qualifies, never generates anything). Skips entirely once a path is
   // already cached, so switching back and forth between pages never
   // re-fetches state it already has.
+  //
+  // PHASE 6 (2026-09-04) extension: this used to hydrate ONLY the
+  // currently open page. It now covers every QUEUED page as well (so the
+  // new multi-page review section below can show every queued page's
+  // prepared-work/approval status without an AM having to open each one
+  // first), plus the open page itself in case it isn't queued (preserving
+  // the original single-page behavior for a Recommended-but-not-yet-queued
+  // page an AM is previewing). Bounded concurrency keeps a client with
+  // many queued pages from firing an unbounded burst of requests at once.
   useEffect(() => {
-    if (!effectiveOpenPath || isHomeOpen) return
-    if (preparedWorkByPath.has(effectiveOpenPath)) return
+    const targetSet = new Set(queuedPaths)
+    if (effectiveOpenPath && !isHomeOpen) targetSet.add(effectiveOpenPath)
+    if (homepageEntry) targetSet.delete(homepageEntry.path)
+    const targets = Array.from(targetSet).filter(path => !preparedWorkByPath.has(path))
+    if (targets.length === 0) return
     let cancelled = false
-    fetch(`/api/clients/${clientId}/schema/prepare-work?path=${encodeURIComponent(effectiveOpenPath)}`)
-      .then(res => (res.ok ? res.json() : null))
-      .then(body => {
-        if (cancelled || !body || !body.opportunity) return
-        setPreparedWorkByPath(prev => new Map(prev).set(effectiveOpenPath, { opportunity: body.opportunity, preparedWork: body.preparedWork || [] }))
-      })
-      .catch(() => { /* best-effort -- an AM can always click "Prepare schema work" fresh */ })
+    runWithBoundedConcurrency(targets, async (path) => {
+      const res = await fetch(`/api/clients/${clientId}/schema/prepare-work?path=${encodeURIComponent(path)}`)
+      if (!res.ok) return
+      const body = await res.json().catch(() => null)
+      if (cancelled || !body || !body.opportunity) return
+      setPreparedWorkByPath(prev => (prev.has(path) ? prev : new Map(prev).set(path, { opportunity: body.opportunity, preparedWork: body.preparedWork || [] })))
+    }, BATCH_CONCURRENCY)
+    // Best-effort throughout -- an AM can always click "Prepare schema
+    // work" fresh on any page this hydration missed, same as before.
     return () => { cancelled = true }
-  }, [effectiveOpenPath, isHomeOpen, clientId, preparedWorkByPath])
+  }, [queuedPaths, effectiveOpenPath, isHomeOpen, homepageEntry, clientId, preparedWorkByPath])
 
   // toggleQueued(path) -- Phase 5 (2026-09): still an immediate, optimistic
   // local toggle (an AM's click must never feel gated on a network round
@@ -860,6 +906,24 @@ export default function SchemaWizard({ pillar, clientId, client }) {
       next.delete(path)
       return next
     })
+    // PHASE 6 (2026-09-04), SELECTION MODEL: unqueuing a page must prune it
+    // from the batch-selection Set immediately -- a page an AM just
+    // removed from schema work must never remain a silent target of the
+    // next "Analyze Selected"/"Prepare Selected" click. This fires on the
+    // optimistic toggle itself (not gated on the persist call below)
+    // because selection is ephemeral, never-persisted UI state to begin
+    // with -- it has no "revert on failure" story of its own, and if the
+    // unqueue itself is later reverted (a failed save), the page simply
+    // goes back to being an ordinary queued-but-unselected row, which an
+    // AM can reselect in one click.
+    if (wasQueued) {
+      setSelectedPaths(prev => {
+        if (!prev.has(path)) return prev
+        const next = new Set(prev)
+        next.delete(path)
+        return next
+      })
+    }
     const dossier = all.find(d => d.path === path)
     try {
       const res = await fetch(`/api/clients/${clientId}/schema/page-work/queue`, {
@@ -890,10 +954,21 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   // never automatically. A page's own classification metadata (type,
   // source, confidence) travels along so the route can run the correct
   // page-type check list without re-walking the sitemap to re-derive it.
-  async function analyzePageNow(path) {
-    if (analyzingPaths.has(path)) return // already in flight -- never double-fire on a fast double-click
+  // analyzeOnePage(path) -- PHASE 6 (2026-09-04): the actual analyze-page
+  // network call plus every state update a completed diagnosis always
+  // needs (pageAnalyses, auto-expand, the non-fatal persistence warning,
+  // and analysisRequestErrors on failure). Extracted from the old
+  // analyzePageNow so BOTH the single-page "Analyze page" button and the
+  // new batch "Analyze Selected" action share one code path -- deliberately
+  // does NOT touch `analyzingPaths` itself, since the two callers below
+  // manage that Set differently (one path at a time vs. the whole batch up
+  // front). NEVER throws -- matches this codebase's established
+  // "external-call wrapper always returns a result object" convention
+  // (lib/pageAnalysis.js, lib/checkers/ahrefs.js, lib/llm/anthropic.js) --
+  // this is what lets runWithBoundedConcurrency's own try/catch stay purely
+  // defensive rather than load-bearing.
+  async function analyzeOnePage(path) {
     const dossier = all.find(d => d.path === path)
-    setAnalyzingPaths(prev => new Set(prev).add(path))
     setAnalysisRequestErrors(prev => {
       if (!prev.has(path)) return prev
       const next = new Map(prev)
@@ -915,8 +990,9 @@ export default function SchemaWizard({ pillar, clientId, client }) {
       })
       const body = await res.json()
       if (!res.ok) {
-        setAnalysisRequestErrors(prev => new Map(prev).set(path, body?.error || `Request failed (HTTP ${res.status}).`))
-        return
+        const message = body?.error || `Request failed (HTTP ${res.status}).`
+        setAnalysisRequestErrors(prev => new Map(prev).set(path, message))
+        return { path, ok: false, error: message }
       }
       setPageAnalyses(prev => new Map(prev).set(path, body))
       // Auto-expand the result the moment a fresh analysis completes -- an
@@ -935,14 +1011,94 @@ export default function SchemaWizard({ pillar, clientId, client }) {
         else next.delete(path)
         return next
       })
+      return { path, ok: true, analysis: body }
     } catch (e) {
-      setAnalysisRequestErrors(prev => new Map(prev).set(path, 'Could not reach the server to analyze this page.'))
+      const message = 'Could not reach the server to analyze this page.'
+      setAnalysisRequestErrors(prev => new Map(prev).set(path, message))
+      return { path, ok: false, error: message }
+    }
+  }
+
+  async function analyzePageNow(path) {
+    if (analyzingPaths.has(path)) return // already in flight -- never double-fire on a fast double-click
+    setAnalyzingPaths(prev => new Set(prev).add(path))
+    try {
+      await analyzeOnePage(path)
     } finally {
       setAnalyzingPaths(prev => {
         const next = new Set(prev)
         next.delete(path)
         return next
       })
+    }
+  }
+
+  // isSelectablePath(path) -- Section 3's SELECTION MODEL: a page can only
+  // be selected for a batch action while it's actually queued (selecting a
+  // page an AM hasn't chosen for schema work at all would be a silent way
+  // to queue-and-act in one step, which is not what Select/Analyze Selected
+  // means), and never the homepage (which is analyzed via the existing
+  // audit pipeline, not this page-by-page flow -- see PageRow's own
+  // "Already analyzed" handling for the same rule).
+  function isSelectablePath(path) {
+    return queuedPaths.has(path) && !(homepageEntry && path === homepageEntry.path)
+  }
+
+  function toggleSelected(path) {
+    setSelectedPaths(prev => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+
+  function selectAllEligible() {
+    setSelectedPaths(new Set(queuedDossiers.filter(d => isSelectablePath(d.path)).map(d => d.path)))
+  }
+
+  function clearSelection() {
+    setSelectedPaths(new Set())
+  }
+
+  // analyzeSelected() -- Section 2's BATCH ANALYSIS: runs analyzeOnePage
+  // for every selected, selectable, not-already-in-flight page, bounded by
+  // BATCH_CONCURRENCY via the same pure runWithBoundedConcurrency utility
+  // the tests in lib/schemaBatchAnalysis.test.js cover. Every selected page
+  // is marked "Analyzing…" up front (one setState call, so the UI reflects
+  // the whole batch instantly rather than one row at a time), then cleared
+  // individually as each one actually finishes -- a slow page never makes
+  // a fast one's completed result sit hidden behind a stale spinner.
+  // Per Section 11: one page's failure is captured in the summary below,
+  // never allowed to stop or hide the others' real results.
+  async function analyzeSelected() {
+    if (isBatchAnalyzing) return
+    const targets = Array.from(selectedPaths).filter(p => isSelectablePath(p) && !analyzingPaths.has(p))
+    if (targets.length === 0) return
+    setIsBatchAnalyzing(true)
+    setBatchAnalysisSummary(null)
+    setAnalyzingPaths(prev => {
+      const next = new Set(prev)
+      targets.forEach(p => next.add(p))
+      return next
+    })
+    try {
+      const results = await runWithBoundedConcurrency(targets, async (path) => {
+        const result = await analyzeOnePage(path)
+        setAnalyzingPaths(prev => {
+          const next = new Set(prev)
+          next.delete(path)
+          return next
+        })
+        return result
+      }, BATCH_CONCURRENCY)
+      const succeeded = results.filter(r => r.status === 'fulfilled' && r.value?.ok)
+      const failedPaths = results
+        .filter(r => !(r.status === 'fulfilled' && r.value?.ok))
+        .map(r => (r.status === 'fulfilled' ? r.value?.path : r.item))
+      setBatchAnalysisSummary({ total: targets.length, succeeded: succeeded.length, failedPaths })
+    } finally {
+      setIsBatchAnalyzing(false)
     }
   }
 
@@ -978,8 +1134,15 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   // automatically, and never on a page that hasn't already been diagnosed
   // as eligible in this UI (see PreparedWorkPanel's own eligibility gate
   // below; the route re-checks eligibility authoritatively regardless).
+  // Returns { ok: true } on success or { ok: false, error } on any
+  // failure -- added in Phase 6 (2026-09-04) purely so prepareSelected()
+  // below can build an accurate "prepared N of M" summary without having
+  // to re-read the preparedWorkErrors Map's own (potentially stale) React
+  // closure. The single "Prepare schema work" button ignores this return
+  // value entirely, so this is a strictly additive change to an existing
+  // function's contract, not a behavior change for its existing caller.
   async function prepareSchemaWorkNow(path) {
-    if (preparingPaths.has(path)) return
+    if (preparingPaths.has(path)) return { ok: false, error: 'Already in progress.' }
     const dossier = all.find(d => d.path === path)
     setPreparingPaths(prev => new Set(prev).add(path))
     clearPreparedWorkError(path)
@@ -1011,9 +1174,10 @@ export default function SchemaWizard({ pillar, clientId, client }) {
         })
       })
     } catch (e) {
-      setPreparedWorkErrors(prev => new Map(prev).set(path, 'Could not reach the server to prepare schema work.'))
+      const message = 'Could not reach the server to prepare schema work.'
+      setPreparedWorkErrors(prev => new Map(prev).set(path, message))
       donePreparingPath()
-      return
+      return { ok: false, error: message }
     }
 
     // Step 2: the server responded with a real HTTP status -- parse its
@@ -1025,15 +1189,17 @@ export default function SchemaWizard({ pillar, clientId, client }) {
     try {
       body = await res.json()
     } catch (e) {
-      setPreparedWorkErrors(prev => new Map(prev).set(path, `The server returned an unexpected response (HTTP ${res.status}) while preparing schema work. This is a server error, not a connectivity problem -- please try again, and report this if it keeps happening.`))
+      const message = `The server returned an unexpected response (HTTP ${res.status}) while preparing schema work. This is a server error, not a connectivity problem -- please try again, and report this if it keeps happening.`
+      setPreparedWorkErrors(prev => new Map(prev).set(path, message))
       donePreparingPath()
-      return
+      return { ok: false, error: message }
     }
 
     if (!res.ok) {
-      setPreparedWorkErrors(prev => new Map(prev).set(path, body?.error || `Request failed (HTTP ${res.status}).`))
+      const message = body?.error || `Request failed (HTTP ${res.status}).`
+      setPreparedWorkErrors(prev => new Map(prev).set(path, message))
       donePreparingPath()
-      return
+      return { ok: false, error: message }
     }
     setPreparedWorkByPath(prev => new Map(prev).set(path, { opportunity: body.opportunity, preparedWork: body.preparedWork || [] }))
     // The route re-diagnosed this page live to establish eligibility --
@@ -1042,6 +1208,47 @@ export default function SchemaWizard({ pillar, clientId, client }) {
     // work it's sitting next to.
     if (body.analysis) setPageAnalyses(prev => new Map(prev).set(path, body.analysis))
     donePreparingPath()
+    return { ok: true }
+  }
+
+  // isEligibleForPrepare(path) -- the SAME eligibility gate PreparedWorkPanel
+  // already applies (isEligibleForPreparedWorkDisplay) plus "doesn't already
+  // have prepared work on file" -- prepareSelected() must never re-prepare a
+  // page that already has a pending/approved/rejected opportunity sitting
+  // next to it (an AM who wants a NEW version for an already-prepared page
+  // uses that page's own "Edit before approving" flow, not a bulk action).
+  function isEligibleForPrepare(path) {
+    const analysis = pageAnalyses.get(path)
+    return isEligibleForPreparedWorkDisplay(analysis) && !preparedWorkByPath.get(path)?.opportunity
+  }
+
+  // prepareSelected() -- Section 6's "Prepare Selected" bulk action: loops
+  // the EXISTING prepareSchemaWorkNow(path) per selected+eligible page with
+  // bounded concurrency, exactly per this phase's guardrails -- never
+  // combines multiple pages into one opportunity (each call creates its own,
+  // independent opportunity via the existing route), and never auto-approves
+  // anything (this only ever reaches the 'pending AM review' state; approval
+  // stays a separate, explicit per-page click).
+  async function prepareSelected() {
+    if (isBatchPreparing) return
+    const targets = Array.from(selectedPaths).filter(p => (
+      isSelectablePath(p) && isEligibleForPrepare(p) && !preparingPaths.has(p)
+    ))
+    if (targets.length === 0) return
+    setIsBatchPreparing(true)
+    setBatchPrepareSummary(null)
+    try {
+      const results = await runWithBoundedConcurrency(targets, async (path) => {
+        const result = await prepareSchemaWorkNow(path)
+        if (!result?.ok) throw new Error(result?.error || 'Could not prepare schema work.')
+        return path
+      }, BATCH_CONCURRENCY)
+      const succeeded = results.filter(r => r.status === 'fulfilled')
+      const failedPaths = results.filter(r => r.status === 'rejected').map(r => r.item)
+      setBatchPrepareSummary({ total: targets.length, succeeded: succeeded.length, failedPaths })
+    } finally {
+      setIsBatchPreparing(false)
+    }
   }
 
   // runOpportunityLifecycleAction(path, opportunityId, action, extra) --
@@ -1256,7 +1463,6 @@ export default function SchemaWizard({ pillar, clientId, client }) {
               isAnalyzing: analyzingPaths.has(dossier.path),
               queueError: queuePersistErrors.get(dossier.path) || null
             })
-            const queuedDossiers = all.filter(d => queuedPaths.has(d.path))
             return (
               <div>
                 <div className="card" style={{ padding: 18, marginBottom: 14 }}>
@@ -1282,53 +1488,148 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                   </div>
                 </div>
 
-                {queuedDossiers.length > 0 && (
-                  <div className="card" style={{ padding: 18, marginBottom: 14 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Schema work queue ({queuedDossiers.length})</div>
-                    <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
-                      Pages an AM has intentionally chosen for schema work -- separate from Recommended (the system&rsquo;s suggestion) and from Open (whichever page is currently shown below). Queuing a page doesn&rsquo;t analyze it by itself; click Analyze page to actually fetch it and run its real checks.
-                    </p>
-                    <div style={{ display: 'grid', gap: 6 }}>
-                      {queuedDossiers.map(dossier => {
-                        const state = getPageState(pageStates, dossier.path)
-                        const isAnalyzing = analyzingPaths.has(dossier.path)
-                        const reqError = analysisRequestErrors.get(dossier.path)
-                        const persistWarning = analysisPersistWarnings.get(dossier.path)
-                        const queueError = queuePersistErrors.get(dossier.path)
-                        const analysis = pageAnalyses.get(dossier.path)
-                        const isExpanded = expandedAnalysisPaths.has(dossier.path)
-                        return (
-                          <div key={dossier.path} className="card" style={{ padding: 10 }}>
-                            <div className="page-row" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto auto', alignItems: 'center', gap: 10 }}>
-                              <span className="type-badge" style={{ cursor: 'default' }}>{dossier.type}</span>
-                              <span className="path" onClick={() => setOpenPath(dossier.path)} style={{ cursor: 'pointer', textDecoration: dossier.path === effectiveOpenPath ? 'underline' : 'none' }}>
-                                {dossier.path}
-                              </span>
-                              <span className={`status ${isAnalyzing ? 'caution' : PAGE_STATE_TONE[state] || 'muted'}`}>
-                                {isAnalyzing ? 'Analyzing…' : (reqError || PAGE_STATE_LABELS[state] || 'Not analyzed yet')}
-                              </span>
-                              {analysis && (
-                                <button className="btn btn-secondary" onClick={() => toggleAnalysisExpanded(dossier.path)}>
-                                  {isExpanded ? 'Hide analysis' : 'View analysis'}
+                {queuedDossiers.length > 0 && (() => {
+                  const selectableCount = queuedDossiers.filter(d => isSelectablePath(d.path)).length
+                  const selectedSelectableCount = Array.from(selectedPaths).filter(isSelectablePath).length
+                  const analyzeTargetCount = Array.from(selectedPaths).filter(p => isSelectablePath(p) && !analyzingPaths.has(p)).length
+                  const prepareTargetCount = Array.from(selectedPaths).filter(p => isSelectablePath(p) && isEligibleForPrepare(p) && !preparingPaths.has(p)).length
+                  return (
+                    <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Schema work queue ({queuedDossiers.length})</div>
+                      <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
+                        Pages an AM has intentionally chosen for schema work -- separate from Recommended (the system&rsquo;s suggestion) and from Open (whichever page is currently shown below). Queuing a page doesn&rsquo;t analyze it by itself; click Analyze page to actually fetch it and run its real checks.
+                      </p>
+                      {/* PHASE 6 (2026-09-04) -- BATCH ANALYSIS / SELECTION MODEL: the
+                          checkboxes below select pages for the two bulk actions here.
+                          Selection is temporary, client-side-only state -- it is never
+                          saved, and is pruned automatically the moment a page is
+                          removed from the queue (see toggleQueued). Selecting a page
+                          never analyzes or prepares it by itself -- only these two
+                          explicit buttons do. */}
+                      <p className="text-tiny text-muted" style={{ margin: '0 0 10px' }}>
+                        Select pages below to Analyze or Prepare several at once -- selection is temporary and clears if a page leaves the queue.
+                      </p>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+                        <button className="btn btn-secondary" onClick={selectAllEligible} disabled={selectableCount === 0}>
+                          Select all eligible ({selectableCount})
+                        </button>
+                        <button className="btn btn-secondary" onClick={clearSelection} disabled={selectedPaths.size === 0}>
+                          Clear selection
+                        </button>
+                        <button className="btn btn-primary" disabled={isBatchAnalyzing || analyzeTargetCount === 0} onClick={analyzeSelected}>
+                          {isBatchAnalyzing ? 'Analyzing selected…' : `Analyze selected (${selectedSelectableCount})`}
+                        </button>
+                        <button className="btn btn-secondary" disabled={isBatchPreparing || prepareTargetCount === 0} onClick={prepareSelected}>
+                          {isBatchPreparing ? 'Preparing selected…' : `Prepare selected (${selectedSelectableCount})`}
+                        </button>
+                      </div>
+                      {/* Partial-success summaries (Section 11) -- deliberately never
+                          replace or hide any individual row's own status/error above;
+                          this is just the one aggregate line an AM needs after a batch
+                          run without inspecting every row. */}
+                      {batchAnalysisSummary && (
+                        <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
+                          Analyzed {batchAnalysisSummary.succeeded} of {batchAnalysisSummary.total} page{batchAnalysisSummary.total === 1 ? '' : 's'}.
+                          {batchAnalysisSummary.failedPaths.length > 0 && ` ${batchAnalysisSummary.failedPaths.length} page${batchAnalysisSummary.failedPaths.length === 1 ? '' : 's'} could not be analyzed: ${batchAnalysisSummary.failedPaths.join(', ')}.`}
+                        </p>
+                      )}
+                      {batchPrepareSummary && (
+                        <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
+                          Prepared {batchPrepareSummary.succeeded} of {batchPrepareSummary.total} page{batchPrepareSummary.total === 1 ? '' : 's'}.
+                          {batchPrepareSummary.failedPaths.length > 0 && ` ${batchPrepareSummary.failedPaths.length} page${batchPrepareSummary.failedPaths.length === 1 ? '' : 's'} could not be prepared: ${batchPrepareSummary.failedPaths.join(', ')}.`}
+                        </p>
+                      )}
+                      <div style={{ display: 'grid', gap: 6 }}>
+                        {queuedDossiers.map(dossier => {
+                          const state = getPageState(pageStates, dossier.path)
+                          const isAnalyzing = analyzingPaths.has(dossier.path)
+                          const reqError = analysisRequestErrors.get(dossier.path)
+                          const persistWarning = analysisPersistWarnings.get(dossier.path)
+                          const queueError = queuePersistErrors.get(dossier.path)
+                          const analysis = pageAnalyses.get(dossier.path)
+                          const isExpanded = expandedAnalysisPaths.has(dossier.path)
+                          const selectable = isSelectablePath(dossier.path)
+                          const prepared = preparedWorkByPath.get(dossier.path)
+                          const approval = prepared?.opportunity?.approval_status
+                          return (
+                            <div key={dossier.path} className="card" style={{ padding: 10 }}>
+                              <div className="page-row" style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr auto auto auto', alignItems: 'center', gap: 10 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedPaths.has(dossier.path)}
+                                  disabled={!selectable}
+                                  onChange={() => toggleSelected(dossier.path)}
+                                  aria-label={selectedPaths.has(dossier.path) ? `Deselect ${dossier.path}` : `Select ${dossier.path} for batch actions`}
+                                  title={selectable ? 'Select for batch Analyze/Prepare' : 'The homepage is analyzed via the audit, not this flow'}
+                                />
+                                <span className="type-badge" style={{ cursor: 'default' }}>{dossier.type}</span>
+                                <span className="path" onClick={() => setOpenPath(dossier.path)} style={{ cursor: 'pointer', textDecoration: dossier.path === effectiveOpenPath ? 'underline' : 'none' }}>
+                                  {dossier.path}
+                                </span>
+                                <span className={`status ${isAnalyzing ? 'caution' : PAGE_STATE_TONE[state] || 'muted'}`}>
+                                  {isAnalyzing ? 'Analyzing…' : (reqError || PAGE_STATE_LABELS[state] || 'Not analyzed yet')}
+                                </span>
+                                {analysis && (
+                                  <button className="btn btn-secondary" onClick={() => toggleAnalysisExpanded(dossier.path)}>
+                                    {isExpanded ? 'Hide analysis' : 'View analysis'}
+                                  </button>
+                                )}
+                                <button className="btn btn-secondary" disabled={isAnalyzing || dossier.type === 'Home'} onClick={() => analyzePageNow(dossier.path)}>
+                                  {dossier.type === 'Home' ? 'Already analyzed' : (state === 'UNANALYZED' ? 'Analyze page' : 'Re-analyze page')}
                                 </button>
-                              )}
-                              <button className="btn btn-secondary" disabled={isAnalyzing || dossier.type === 'Home'} onClick={() => analyzePageNow(dossier.path)}>
-                                {dossier.type === 'Home' ? 'Already analyzed' : (state === 'UNANALYZED' ? 'Analyze page' : 'Re-analyze page')}
-                              </button>
-                            </div>
-                            {queueError && <p className="text-small issue-why" style={{ margin: '6px 0 0' }}>Could not save this queue change: {queueError}</p>}
-                            {persistWarning && <p className="text-small issue-why" style={{ margin: '6px 0 0' }}>{persistWarning}</p>}
-                            {isExpanded && analysis && (
-                              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-                                <PageAnalysisResult analysis={analysis} />
                               </div>
-                            )}
-                          </div>
-                        )
-                      })}
+                              {/* STATUS MODEL (Section 8) -- the approval/prepared-work
+                                  status is a SEPARATE fact from the diagnosis status above
+                                  (ACTIONABLE_GAP/NO_ACTION_NEEDED/etc.), shown as its own
+                                  badge rather than folded into or overwriting it, so an AM
+                                  can tell "what did the diagnosis find" apart from "what's
+                                  happened to the prepared fix for it" at a glance. */}
+                              {approval && APPROVAL_STATUS_COPY[approval] && (
+                                <div style={{ margin: '6px 0 0 24px' }}>
+                                  <span className={`issue-badge ${APPROVAL_STATUS_COPY[approval].tone}`}>
+                                    {APPROVAL_STATUS_COPY[approval].label}
+                                  </span>
+                                </div>
+                              )}
+                              {queueError && <p className="text-small issue-why" style={{ margin: '6px 0 0' }}>Could not save this queue change: {queueError}</p>}
+                              {persistWarning && <p className="text-small issue-why" style={{ margin: '6px 0 0' }}>{persistWarning}</p>}
+                              {isExpanded && analysis && (
+                                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                                  <PageAnalysisResult analysis={analysis} />
+                                  {/* MULTI-PAGE REVIEW (Section 4/7) -- the SAME
+                                      PreparedWorkPanel Step 3 uses for the single open
+                                      page, reused here per queued+expanded page so an AM
+                                      can review/approve/edit/reject prepared schema work
+                                      for several pages without opening each one
+                                      individually. Zero new review UI was built -- this
+                                      is entirely the existing component and handlers,
+                                      parameterized by this row's own path instead of
+                                      effectiveOpenPath. */}
+                                  <PreparedWorkPanel
+                                    path={dossier.path}
+                                    analysis={analysis}
+                                    prepared={prepared}
+                                    isPreparing={preparingPaths.has(dossier.path)}
+                                    isBusy={lifecycleBusyPaths.has(dossier.path)}
+                                    error={preparedWorkErrors.get(dossier.path)}
+                                    editingDraft={editingDrafts.get(dossier.path)}
+                                    onPrepare={() => prepareSchemaWorkNow(dossier.path)}
+                                    onApprove={(latest) => approvePreparedWork(dossier.path, prepared?.opportunity?.id, latest)}
+                                    onStartEdit={(payload) => startEditingPreparedWork(dossier.path, payload)}
+                                    onCancelEdit={() => cancelEditingPreparedWork(dossier.path)}
+                                    onDraftChange={(text) => setEditingDrafts(prev => new Map(prev).set(dossier.path, text))}
+                                    onSaveEdit={(latest) => saveEditedPreparedWork(dossier.path, prepared?.opportunity?.id, latest)}
+                                    onReject={() => rejectPreparedWork(dossier.path, prepared?.opportunity?.id)}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )
+                })()}
 
                 {/* PRODUCT DECISION #1 (2026-09-02 correction pass): "All
                     discovered pages" is REMOVED from the normal workflow --
