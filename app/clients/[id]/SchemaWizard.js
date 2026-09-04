@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import SchemaGenerator from './SchemaGenerator'
 import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 import { computeRecommendedSet } from '../../../lib/schemaPagePriority'
-import { toggleQueuedPath, resolveOpenPath } from '../../../lib/schemaPageSelection'
-import { deriveHomepageState, deriveStateFromAnalysis, excludedPathsFromStates, getPageState } from '../../../lib/schemaPageLifecycle'
+import { toggleQueuedPath, resolveOpenPath, resolveActiveWorkItem } from '../../../lib/schemaPageSelection'
+import { deriveHomepageState, deriveStateFromAnalysis, deriveCompletionOverride, excludedPathsFromStates, getPageState } from '../../../lib/schemaPageLifecycle'
 import { mergeDurableQueuedPaths, mergeDurableAnalyses } from '../../../lib/schemaPageHydration'
 import { runWithBoundedConcurrency } from '../../../lib/schemaBatchAnalysis'
 
@@ -698,6 +698,56 @@ function PreparedWorkPanel({
   )
 }
 
+// WorkQueueSummary -- 2026-09-04d WORKFLOW CORRECTION. A compact "AM is
+// working through a queue" readout for Steps 4-6 (item 11 of the workflow
+// correction spec): the homepage/sitewide task plus every page the AM has
+// actually queued for Schema work, each shown with its real durable state
+// (COMPLETED/NO_ACTION_NEEDED read the exact same pageStates map Step 1-3
+// already use to exclude finished pages from `recommended` -- no separate
+// "done" concept invented here) and a marker for whichever one is the
+// current activeWorkItem. Purely presentational; never fetches, never
+// mutates state. Renders nothing when there is nothing to show (no
+// homepage entry and no queued pages yet).
+const WORK_QUEUE_STATE_COPY = {
+  COMPLETED: 'Verified',
+  NO_ACTION_NEEDED: 'No action needed',
+  WORK_IN_PROGRESS: 'In progress',
+  ACTIONABLE_GAP: 'Actionable gap',
+  UNANALYZED: 'Not prepared'
+}
+
+function WorkQueueSummary({ homepageEntry, pageStates, queuedDossiers, activeWorkItem }) {
+  const items = []
+  if (homepageEntry) {
+    items.push({ path: homepageEntry.path, label: 'Homepage', state: getPageState(pageStates, homepageEntry.path) })
+  }
+  for (const d of queuedDossiers || []) {
+    if (homepageEntry && d.path === homepageEntry.path) continue
+    items.push({ path: d.path, label: d.type || 'Page', state: getPageState(pageStates, d.path) })
+  }
+  if (items.length === 0) return null
+
+  return (
+    <div className="card" style={{ padding: 12, marginBottom: 14 }}>
+      <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 8 }}>Work queue</div>
+      <div style={{ display: 'grid', gap: 4 }}>
+        {items.map(item => {
+          const isActive = activeWorkItem?.path === item.path
+          const isDone = item.state === 'COMPLETED' || item.state === 'NO_ACTION_NEEDED'
+          const marker = isDone ? '✓' : isActive ? '→' : '○'
+          return (
+            <div key={item.path} className="text-small" style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontWeight: isActive ? 600 : 400 }}>
+              <span>{marker}</span>
+              <span>{item.path}</span>
+              <span className="text-muted">&mdash; {item.label} &mdash; {WORK_QUEUE_STATE_COPY[item.state] || item.state}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function SchemaWizard({ pillar, clientId, client }) {
   const [step, setStep] = useState(1)
   const [selectedPill, setSelectedPill] = useState(null)
@@ -937,8 +987,21 @@ export default function SchemaWizard({ pillar, clientId, client }) {
     for (const [path, analysis] of pageAnalyses.entries()) {
       states.set(path, deriveStateFromAnalysis(analysis))
     }
+    // COMPLETION OVERRIDE (2026-09-04d WORKFLOW CORRECTION) -- a page whose
+    // Schema opportunity has actually been executed AND verified live is
+    // durably done, real evidence from the Phase 3/7 lifecycle, and always
+    // wins over the local analysis heuristic above (which never re-runs on
+    // its own after a fix ships). This is what lets the page-level
+    // workflow ADVANCE: once /about/ is COMPLETED here, excludePaths below
+    // drops it from `recommended`, and the very next unfinished eligible
+    // page (e.g. /contact/) becomes the natural next active work item --
+    // no separate "advance to next item" state machine required.
+    for (const [path, entry] of preparedWorkByPath.entries()) {
+      const completed = deriveCompletionOverride(entry?.opportunity)
+      if (completed) states.set(path, completed)
+    }
     return states
-  }, [pillar, homepageEntry, pageAnalyses])
+  }, [pillar, homepageEntry, pageAnalyses, preparedWorkByPath])
 
   // excludePaths -- PRODUCT DECISION #3 / #11: a page in a resolved state
   // (today: NO_ACTION_NEEDED -- see lib/schemaPageLifecycle.js) never
@@ -954,9 +1017,34 @@ export default function SchemaWizard({ pillar, clientId, client }) {
 
   const effectiveOpenPath = resolveOpenPath({ openPath, recommended, candidatePages })
   const openDossier = all.find(d => d.path === effectiveOpenPath) || null
+  // activeWorkItem -- 2026-09-04d WORKFLOW CORRECTION: the single source of
+  // truth for "is the active Schema work item the homepage/sitewide task,
+  // or a specific page's task," used by Steps 4/5/6 below so Generate &
+  // Review / Publish / Verify can never disagree about which item is
+  // active (see lib/schemaPageSelection.js#resolveActiveWorkItem's header
+  // for the full root-cause writeup of the bug this fixes -- Step 4 used
+  // to always render the homepage generator regardless of this).
+  const activeWorkItem = useMemo(
+    () => resolveActiveWorkItem({ effectiveOpenPath, homepagePath: homepageEntry?.path || null }),
+    [effectiveOpenPath, homepageEntry]
+  )
   // isHomeOpen -- same fix as homepageEntry above: compares against the
-  // homepage's REAL discovered path, never a hardcoded '/' literal.
-  const isHomeOpen = !!homepageEntry && effectiveOpenPath === homepageEntry.path
+  // homepage's REAL discovered path, never a hardcoded '/' literal. Now
+  // derived from activeWorkItem so both stay structurally in sync.
+  const isHomeOpen = activeWorkItem.type === 'home'
+
+  // showGenerateReviewCta -- 2026-09-04d WORKFLOW CORRECTION (item 9): lets
+  // Step 3's "What's missing" open the SAME active page in Step 4's
+  // Generate & Review, mirroring the homepage's existing "Fix with the
+  // generator ->" button, now that Step 4 actually renders this page's own
+  // PreparedWorkPanel instead of the homepage generator (see
+  // resolveActiveWorkItem). Same eligibility PreparedWorkPanel itself uses
+  // (isEligibleForPreparedWorkDisplay -- an actionable diagnosis, OR
+  // prepared work already on file) so this button never appears for a page
+  // with nothing to review yet.
+  const nonHomeOpenAnalysis = !isHomeOpen ? pageAnalyses.get(effectiveOpenPath) : null
+  const nonHomeOpenPrepared = !isHomeOpen ? preparedWorkByPath.get(effectiveOpenPath) : null
+  const showGenerateReviewCta = !isHomeOpen && (isEligibleForPreparedWorkDisplay(nonHomeOpenAnalysis) || !!nonHomeOpenPrepared?.opportunity)
 
   // queuedDossiers -- PHASE 6 (2026-09-04): hoisted out of Step 2's JSX
   // (where it used to be computed inline, once per render, only reachable
@@ -2013,20 +2101,116 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                 rendered above (Phase 6, 2026-09-03) already owns the
                 entire Prepare/Approve/Edit/Reject flow for this page, so
                 this footer intentionally shows no second, competing
-                Prepare Schema Work control -- see Section 18 of the
-                2026-09 persistence/integration debugging pass. */}
+                Prepare Schema Work control here in Step 3 -- see Section
+                18 of the 2026-09 persistence/integration debugging pass.
+                It DOES now offer a way into Step 4 (2026-09-04d WORKFLOW
+                CORRECTION, item 9) -- now that Step 4 correctly renders
+                THIS page's own review UI instead of the homepage
+                generator (see resolveActiveWorkItem), sending an AM there
+                is no longer a dead end or a wrong-page surprise. */}
+            {showGenerateReviewCta && (
+              <button className="btn btn-primary" onClick={() => setStep(4)}>Generate &amp; Review &rarr;</button>
+            )}
           </div>
         </div>
       )}
 
+      {/* Steps 4-6 -- Generate & Review / Publish / Verify. 2026-09-04d
+          WORKFLOW CORRECTION: this used to render <SchemaGenerator>
+          (the homepage/sitewide LocalBusiness tool) UNCONDITIONALLY,
+          regardless of which page was actually open -- it never consulted
+          effectiveOpenPath/isHomeOpen at all, so an AM working /about/'s or
+          /contact/'s Schema gap who reached these steps (via the "Generate
+          & Review" step chip, or Step 3's old "Fix with the generator"
+          affordance staying set from a prior homepage visit) saw the
+          unrelated homepage form -- even after the homepage's own schema
+          was already generated, published and verified. See
+          lib/schemaPageSelection.js#resolveActiveWorkItem's header for the
+          full root-cause writeup.
+          Now these steps dispatch on activeWorkItem -- the SAME
+          effectiveOpenPath/homepage-path comparison Steps 1-3 already use
+          -- so Generate & Review, Publish and Verify are structurally
+          guaranteed to act on one, single, current work item:
+            - 'home'  -> the existing homepage/sitewide generator, UNCHANGED
+              (PRODUCT DECISION: it may remain the homepage's own tool; see
+              item 2/10 of the workflow correction -- it is not migrated
+              onto the opportunities/schema_page_work lifecycle here, since
+              it never participated in that lifecycle to begin with. That
+              remains the one identified architectural gap; see this
+              session's final report).
+            - 'page'  -> this page's OWN diagnosis + the exact same
+              PreparedWorkPanel (Prepare/Review/Approve/Edit/Reject, then
+              Deploy/Verify via WordPressExecutionPanel) Step 3 already
+              renders inline for a non-home page -- reused as-is, never a
+              second generator/review architecture. Deploy and Verify here
+              act on this exact opportunity/approved prepared-work, the
+              same one Step 3's inline panel and the execute-work/
+              verify-work routes already resolve by fingerprint (see the
+              2026-09-04c hotfix) -- there is no separate "which page is
+              step 5 about" state that could ever drift from step 4's.
+            - null    -> no page is open yet (e.g. zero candidate pages) --
+              an honest empty state, never a guess at what to show. */}
       {(step === 4 || step === 5 || step === 6) && (
         <div>
-          <SchemaGenerator
-            clientId={clientId}
-            client={client}
-            bare
-            visibleSection={step === 4 ? 'form' : step === 5 ? 'publish' : 'verify'}
+          <WorkQueueSummary
+            homepageEntry={homepageEntry}
+            pageStates={pageStates}
+            queuedDossiers={queuedDossiers}
+            activeWorkItem={activeWorkItem}
           />
+          {activeWorkItem.type === 'home' ? (
+            <SchemaGenerator
+              clientId={clientId}
+              client={client}
+              bare
+              visibleSection={step === 4 ? 'form' : step === 5 ? 'publish' : 'verify'}
+            />
+          ) : activeWorkItem.type === 'page' ? (() => {
+            const analysis = pageAnalyses.get(activeWorkItem.path)
+            if (!analysis) {
+              return (
+                <div className="card-empty" style={{ padding: 18 }}>
+                  <div className="text-small text-muted">This page hasn&rsquo;t been analyzed yet -- go back and click Analyze page.</div>
+                </div>
+              )
+            }
+            return (
+              <div className="card" style={{ padding: 18 }}>
+                <div className="grade-title" style={{ marginBottom: 2 }}>
+                  {activeWorkItem.path} &mdash; {analysis.classification?.type || 'Page'}
+                </div>
+                <div className="grade-sub" style={{ marginBottom: 14 }}>
+                  Generate &amp; Review, Publish and Verify all act on this exact page -- never the homepage/sitewide generator.
+                </div>
+                <PageAnalysisResult analysis={analysis} />
+                <PreparedWorkPanel
+                  path={activeWorkItem.path}
+                  analysis={analysis}
+                  prepared={preparedWorkByPath.get(activeWorkItem.path)}
+                  isPreparing={preparingPaths.has(activeWorkItem.path)}
+                  isBusy={lifecycleBusyPaths.has(activeWorkItem.path)}
+                  error={preparedWorkErrors.get(activeWorkItem.path)}
+                  editingDraft={editingDrafts.get(activeWorkItem.path)}
+                  onPrepare={() => prepareSchemaWorkNow(activeWorkItem.path)}
+                  onApprove={(latest) => approvePreparedWork(activeWorkItem.path, preparedWorkByPath.get(activeWorkItem.path)?.opportunity?.id, latest)}
+                  onStartEdit={(payload) => startEditingPreparedWork(activeWorkItem.path, payload)}
+                  onCancelEdit={() => cancelEditingPreparedWork(activeWorkItem.path)}
+                  onDraftChange={(text) => setEditingDrafts(prev => new Map(prev).set(activeWorkItem.path, text))}
+                  onSaveEdit={(latest) => saveEditedPreparedWork(activeWorkItem.path, preparedWorkByPath.get(activeWorkItem.path)?.opportunity?.id, latest)}
+                  onReject={() => rejectPreparedWork(activeWorkItem.path, preparedWorkByPath.get(activeWorkItem.path)?.opportunity?.id)}
+                  onDeploy={() => deploySchemaWork(activeWorkItem.path, preparedWorkByPath.get(activeWorkItem.path)?.opportunity?.id)}
+                  onVerify={() => verifySchemaWork(activeWorkItem.path, preparedWorkByPath.get(activeWorkItem.path)?.opportunity?.id)}
+                  isExecuting={executingPaths.has(activeWorkItem.path)}
+                  isVerifying={verifyingPaths.has(activeWorkItem.path)}
+                  executionError={executionErrors.get(activeWorkItem.path)}
+                />
+              </div>
+            )
+          })() : (
+            <div className="card-empty" style={{ padding: 18 }}>
+              <div className="text-small text-muted">Pick a page in Step 2 first.</div>
+            </div>
+          )}
           <div className="cta-row">
             <button className="btn btn-secondary" onClick={() => setStep(step - 1)}>&larr; Back</button>
             {step < 6 && (
