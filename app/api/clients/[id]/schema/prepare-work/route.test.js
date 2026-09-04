@@ -349,6 +349,65 @@ async function testNeverCallsExecutionOrVerificationOrPublish() {
 }
 
 // ---------------------------------------------------------------------
+// 6b-6e. HOTFIX (2026-09-04b) -- GET must ALSO reconcile execution_capability,
+// not only POST. Root cause this covers: "Prepare schema work" only ever
+// renders (and POST only ever fires) for a page with no opportunity yet --
+// once approved, nothing in the UI calls POST for that page again, so an
+// opportunity approved before WordPress was connected (or before this sync
+// existed) was permanently stuck at RED. GET, unlike POST, IS already
+// called automatically on every page load (SchemaWizard.js's hydration
+// effect) -- confirmed live against production data for exactly this
+// scenario (Firestarter SEO's /about/ and /contact/ opportunities,
+// approved before their WordPress connection was ever synced).
+// ---------------------------------------------------------------------
+async function testGetUpgradesRedToYellowWhenWordPressConnected() {
+  resetAll()
+  tables.clients = [{ id: 'client-1', url: 'https://example.com', wp_username: 'am', wp_app_password_encrypted: 'enc:abc' }]
+  // opp-1 stays 'red' (resetAll's default) -- an already-approved opportunity
+  // that predates this client's WordPress connection being synced.
+  const res = await GET(getReq({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200)
+  const body = await res.json()
+  assert.strictEqual(spies.setPriorityTreatment.calls.length, 1, 'GET must self-heal a stale RED opportunity for an already-connected client')
+  assert.strictEqual(spies.setPriorityTreatment.calls[0][0], 'opp-1')
+  assert.strictEqual(spies.setPriorityTreatment.calls[0][1].executionCapability, 'yellow')
+  assert.strictEqual(body.opportunity.execution_capability, 'yellow', 'the SAME response that triggered the sync must already reflect it -- no second round-trip required')
+  log('TEST (GET reconciles a stale RED opportunity to YELLOW for an already-WordPress-connected client -- fixes the "Deploy to WordPress" button never appearing for opportunities approved before the connection was synced) PASSED')
+}
+
+async function testGetDowngradesYellowToRedWhenWordPressDisconnected() {
+  resetAll()
+  tables.opportunities = [{ id: 'opp-1', client_id: 'client-1', fingerprint: 'schema:/about', title: 'x', execution_capability: 'yellow' }]
+  // Default client fixture has no wp_username/wp_app_password_encrypted.
+  const res = await GET(getReq({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200)
+  const body = await res.json()
+  assert.strictEqual(spies.setPriorityTreatment.calls.length, 1)
+  assert.strictEqual(spies.setPriorityTreatment.calls[0][1].executionCapability, 'red')
+  assert.strictEqual(body.opportunity.execution_capability, 'red')
+  log('TEST (GET also downgrades a stale YELLOW opportunity back to RED for a since-disconnected client) PASSED')
+}
+
+async function testGetIsNoopWhenCapabilityAlreadyMatches() {
+  resetAll() // default: client disconnected, opp-1 already 'red' -- already correct
+  const res = await GET(getReq({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200)
+  assert.strictEqual(spies.setPriorityTreatment.calls.length, 0, 'a GET read must never write or log a history event when capability already matches reality')
+  log('TEST (GET makes no write when execution_capability already matches the client\'s real WordPress-connection state) PASSED')
+}
+
+async function testGetSyncFailureNeverBreaksTheRead() {
+  resetAll()
+  tables.clients = [{ id: 'client-1', url: 'https://example.com', wp_username: 'am', wp_app_password_encrypted: 'enc:abc' }]
+  spies.setPriorityTreatment.reset(async () => { throw new Error('opportunity was concurrently modified') })
+  const res = await GET(getReq({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200, 'a capability-sync failure during GET must never turn an otherwise-successful read into an error')
+  const body = await res.json()
+  assert.strictEqual(body.opportunity.id, 'opp-1')
+  log('TEST (a setPriorityTreatment failure during GET\'s capability sync is swallowed -- the opportunity read still succeeds) PASSED')
+}
+
+// ---------------------------------------------------------------------
 // 7. GET -- read-only refresh, no fetch/qualify/prepare.
 // ---------------------------------------------------------------------
 async function testGetReturnsExistingOpportunityWithoutRefetching() {
@@ -480,6 +539,10 @@ async function main() {
   await testCapabilitySyncIsNoopWhenAlreadyMatching()
   await testCapabilitySyncFailureIsNonFatal()
   await testNeverCallsExecutionOrVerificationOrPublish()
+  await testGetUpgradesRedToYellowWhenWordPressConnected()
+  await testGetDowngradesYellowToRedWhenWordPressDisconnected()
+  await testGetIsNoopWhenCapabilityAlreadyMatches()
+  await testGetSyncFailureNeverBreaksTheRead()
   await testGetReturnsExistingOpportunityWithoutRefetching()
   await testGetReturnsNullForANeverPreparedPage()
   await testGetPathValidation()

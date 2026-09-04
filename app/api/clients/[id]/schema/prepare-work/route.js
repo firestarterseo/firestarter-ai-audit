@@ -5,6 +5,51 @@ const { buildPreparedSchemaWork } = require('../../../../../../lib/schemaPrepare
 const { prepareWork, submitForApproval, getPreparedWork, getOpportunityHistory, setPriorityTreatment } = require('../../../../../../lib/opportunityLifecycle')
 const { upsertAnalysisResult, linkOpportunity } = require('../../../../../../lib/schemaPageWork')
 
+// syncExecutionCapabilityForOpportunity(supabase, opportunity, client) --
+// Phase 7 HOTFIX (2026-09-04b). Factored out of the POST handler's own
+// EXECUTION CAPABILITY SYNC block (see that block's original comment,
+// preserved below) so the SAME reconciliation also runs from GET, not only
+// from POST.
+//
+// ROOT CAUSE this fixes: PreparedWorkPanel's "Prepare schema work" button
+// in SchemaWizard.js only ever renders (and therefore this route's POST
+// handler only ever fires) when a page has NO existing opportunity yet
+// (`!opportunity`). Once an opportunity is qualified/prepared/approved,
+// nothing in the UI ever calls POST for that page again. So any
+// opportunity that was already approved BEFORE a client connected
+// WordPress -- or before this capability-sync logic existed at all -- was
+// permanently stuck at execution_capability: 'red', even after WordPress
+// was connected and this code shipped: confirmed against production data
+// for the Firestarter SEO client's /about/ and /contact/ opportunities,
+// both approved 2026-09-03 (before this sync existed) against a client
+// that connected WordPress back on 2026-08-12 -- WordPress connection
+// state was real and correct the whole time, but nothing ever re-checked
+// it for those two already-existing opportunities. GET, unlike POST, IS
+// already called automatically -- SchemaWizard.js's own hydration effect
+// fires GET /prepare-work?path=... for every queued page on every page
+// load -- so that is the right, already-existing trigger to reconcile
+// from, rather than inventing a new one or requiring an AM to somehow
+// "re-prepare" an already-approved page (which would also incorrectly
+// re-run live diagnosis/generation, not just fix a stale flag).
+//
+// Mutates `opportunity.execution_capability` in place on success so the
+// SAME response that triggered the sync already reflects it, without
+// requiring a second round-trip. Best-effort/non-fatal -- a failure here
+// must never turn an otherwise-successful read or preparation into an
+// error.
+async function syncExecutionCapabilityForOpportunity(supabase, opportunity, client) {
+  try {
+    const wpConnected = !!(client && client.wp_username && client.wp_app_password_encrypted)
+    const desiredCapability = wpConnected ? 'yellow' : 'red'
+    if (opportunity.execution_capability !== desiredCapability) {
+      await setPriorityTreatment(opportunity.id, { executionCapability: desiredCapability, actor: 'system' })
+      opportunity.execution_capability = desiredCapability
+    }
+  } catch (e) {
+    console.error('[schema/prepare-work] execution-capability sync failed:', e)
+  }
+}
+
 // Live page fetch (twice -- see lib/schemaPreparedWork.js's own header on
 // why buildPreparedSchemaWork does its own independent fetch rather than
 // reusing analyzePage()'s -- both single, bounded, AM-triggered fetches of
@@ -131,11 +176,9 @@ async function POST(request, { params }) {
   // here never blocks preparation itself, since the opportunity above is
   // already durably saved regardless of what happens next.
   try {
-    const wpConnected = !!(client.wp_username && client.wp_app_password_encrypted)
-    const desiredCapability = wpConnected ? 'yellow' : 'red'
     const { data: currentOpportunity } = await supabase.from('opportunities').select('execution_capability').eq('id', opportunityId).single()
-    if (currentOpportunity && currentOpportunity.execution_capability !== desiredCapability) {
-      await setPriorityTreatment(opportunityId, { executionCapability: desiredCapability, actor: 'system' })
+    if (currentOpportunity) {
+      await syncExecutionCapabilityForOpportunity(supabase, { id: opportunityId, execution_capability: currentOpportunity.execution_capability }, client)
     }
   } catch (e) {
     console.error('[schema/prepare-work] execution-capability sync failed:', e)
@@ -277,6 +320,20 @@ async function GET(request, { params }) {
       .from('opportunities').select('*').eq('client_id', id).eq('fingerprint', fingerprint).maybeSingle()
     if (error) throw error
     if (!opportunity) return Response.json({ opportunity: null, preparedWork: [], history: [] })
+
+    // EXECUTION CAPABILITY SYNC (Phase 7 hotfix, 2026-09-04b) -- see
+    // syncExecutionCapabilityForOpportunity's own header above for why this
+    // must also run here, not only from POST. Its own try/catch is wrapped
+    // in a second one here so a failure in the client lookup itself can
+    // never turn an otherwise-successful opportunity read into a 500 --
+    // same best-effort contract as everywhere else this sync runs.
+    try {
+      const { data: client, error: clientError } = await supabase
+        .from('clients').select('wp_username, wp_app_password_encrypted').eq('id', id).maybeSingle()
+      if (!clientError) await syncExecutionCapabilityForOpportunity(supabase, opportunity, client)
+    } catch (e) {
+      console.error('[schema/prepare-work] GET execution-capability sync failed:', e)
+    }
 
     const [preparedWork, history] = await Promise.all([
       getPreparedWork(opportunity.id, { artifactType: 'schema_jsonld' }),
