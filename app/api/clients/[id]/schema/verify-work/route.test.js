@@ -34,6 +34,11 @@ function makeTable(tableName) {
           const rows = tables[tableName] || []
           const match = rows.find(r => Object.entries(filters).every(([k, v]) => r[k] === v))
           return match ? { data: match, error: null } : { data: null, error: { message: `${tableName} row not found` } }
+        },
+        async maybeSingle() {
+          const rows = tables[tableName] || []
+          const match = rows.find(r => Object.entries(filters).every(([k, v]) => r[k] === v))
+          return { data: match || null, error: null }
         }
       }
       return builder
@@ -67,7 +72,14 @@ const HTML_MISSING = '<html><head></head><body>no schema here</body></html>'
 const spies = {
   resolvePageUrl: makeSyncSpy((siteUrl, p) => `${siteUrl}${p}`),
   fetchWebPage: makeSpy(async () => ({ fetchState: 'success', html: HTML_MATCHING })),
-  getPageWorkRow: makeSpy(async () => ({ opportunity_id: 'opp-1' })),
+  // HOTFIX (2026-09-04c) regression coverage: getPageWorkRow now backs ONLY
+  // the best-effort reconciliation/backfill, never the primary opportunity
+  // lookup (fingerprint does that -- see execute-work/route.js's header,
+  // which verify-work's own hotfix mirrors) -- default fixture deliberately
+  // returns a stale/missing link so every existing test exercises that case
+  // by default, not just the dedicated reconciliation tests.
+  getPageWorkRow: makeSpy(async () => ({ opportunity_id: null, page_url: 'https://example.com/about/' })),
+  linkOpportunity: makeSpy(async () => ({ id: 'pgw-1', opportunity_id: 'opp-1' })),
   requestVerification: makeSpy(async () => ({ ok: true })),
   recordVerification: makeSpy(async () => ({ ok: true }))
 }
@@ -75,7 +87,7 @@ const spies = {
 require.cache[supabaseServerPath] = { id: supabaseServerPath, filename: supabaseServerPath, loaded: true, exports: { getSupabaseServerClient: () => fakeSupabase() } }
 require.cache[pageAnalysisPath] = { id: pageAnalysisPath, filename: pageAnalysisPath, loaded: true, exports: { resolvePageUrl: spies.resolvePageUrl } }
 require.cache[webPageFetchPath] = { id: webPageFetchPath, filename: webPageFetchPath, loaded: true, exports: { fetchWebPage: spies.fetchWebPage } }
-require.cache[schemaPageWorkPath] = { id: schemaPageWorkPath, filename: schemaPageWorkPath, loaded: true, exports: { getPageWorkRow: spies.getPageWorkRow } }
+require.cache[schemaPageWorkPath] = { id: schemaPageWorkPath, filename: schemaPageWorkPath, loaded: true, exports: { getPageWorkRow: spies.getPageWorkRow, linkOpportunity: spies.linkOpportunity } }
 require.cache[opportunityLifecyclePath] = { id: opportunityLifecyclePath, filename: opportunityLifecyclePath, loaded: true, exports: { requestVerification: spies.requestVerification, recordVerification: spies.recordVerification } }
 
 const { POST } = require(routePath)
@@ -84,14 +96,15 @@ function resetAll() {
   tables = {
     clients: [{ id: 'client-1', url: 'https://example.com' }],
     opportunities: [{
-      id: 'opp-1', client_id: 'client-1', originating_pillar: 'schema_structure',
+      id: 'opp-1', client_id: 'client-1', fingerprint: 'schema:/about', originating_pillar: 'schema_structure',
       execution_status: 'executed',
       execution_state: { result: { ok: true, deployedJsonLd: DEPLOYED_ABOUT, postId: 42 } }
     }]
   }
   spies.resolvePageUrl.reset((siteUrl, p) => `${siteUrl}${p}`)
   spies.fetchWebPage.reset(async () => ({ fetchState: 'success', html: HTML_MATCHING }))
-  spies.getPageWorkRow.reset(async () => ({ opportunity_id: 'opp-1' }))
+  spies.getPageWorkRow.reset(async () => ({ opportunity_id: null, page_url: 'https://example.com/about/' }))
+  spies.linkOpportunity.reset(async () => ({ id: 'pgw-1', opportunity_id: 'opp-1' }))
   spies.requestVerification.reset(async () => ({ ok: true }))
   spies.recordVerification.reset(async () => ({ ok: true }))
 }
@@ -119,10 +132,53 @@ async function testClientLookupMissing() {
 
 async function testNoOpportunityForPage() {
   resetAll()
-  spies.getPageWorkRow.reset(async () => null)
+  tables.opportunities = [] // no row matches this client_id + fingerprint at all
   const res = await POST(req({ path: '/about/' }), ctx())
   assert.strictEqual(res.status, 400)
-  log('TEST (a page with no schema opportunity at all cannot be verified) PASSED')
+  log('TEST (a page with no schema opportunity at all -- no row matching this fingerprint -- cannot be verified) PASSED')
+}
+
+// ---------------------------------------------------------------------
+// HOTFIX (2026-09-04c) regression coverage -- mirrors execute-work's own:
+// a real, executed opportunity exists (found by fingerprint) but
+// schema_page_work.opportunity_id is null/stale. Verification must
+// succeed anyway, and the link should be backfilled on-read.
+// ---------------------------------------------------------------------
+async function testMissingPageWorkLinkDoesNotBlockVerification() {
+  resetAll() // default fixture already returns a stale/missing link
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200, 'a stale/missing schema_page_work link must never block verification of an opportunity the fingerprint lookup resolved correctly')
+  const body = await res.json()
+  assert.strictEqual(body.verificationStatus, 'verified')
+  log('TEST (a missing schema_page_work.opportunity_id link no longer blocks verification -- the route resolves the opportunity by fingerprint instead) PASSED')
+}
+
+async function testMissingPageWorkLinkGetsBackfilledOnVerify() {
+  resetAll()
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200)
+  assert.strictEqual(spies.linkOpportunity.calls.length, 1, 'a stale/missing link must be backfilled during a successful verify')
+  assert.strictEqual(spies.linkOpportunity.calls[0][0].opportunityId, 'opp-1', 'reconciliation must link to the EXACT opportunity this route resolved')
+  log('TEST (verify backfills the stale schema_page_work link to the exact opportunity it resolved, via the existing idempotent linkOpportunity()) PASSED')
+}
+
+async function testAlreadyCorrectLinkIsNotRewrittenOnVerify() {
+  resetAll()
+  spies.getPageWorkRow.reset(async () => ({ opportunity_id: 'opp-1', page_url: 'https://example.com/about/' }))
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200)
+  assert.strictEqual(spies.linkOpportunity.calls.length, 0, 'an already-correct link must not be rewritten on every verify')
+  log('TEST (verify makes no reconciliation write when schema_page_work is already linked to the correct opportunity) PASSED')
+}
+
+async function testReconciliationFailureNeverBlocksVerification() {
+  resetAll()
+  spies.linkOpportunity.reset(async () => { throw new Error('opportunity_id column is unique and already taken') })
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200, 'a reconciliation/backfill failure must never block an otherwise-valid verification -- it is best-effort only')
+  const body = await res.json()
+  assert.strictEqual(body.verificationStatus, 'verified')
+  log('TEST (a linkOpportunity failure during reconciliation is swallowed -- verification itself still succeeds) PASSED')
 }
 
 async function testOriginatingPillarMismatch() {
@@ -247,6 +303,10 @@ async function main() {
   await testPathValidation()
   await testClientLookupMissing()
   await testNoOpportunityForPage()
+  await testMissingPageWorkLinkDoesNotBlockVerification()
+  await testMissingPageWorkLinkGetsBackfilledOnVerify()
+  await testAlreadyCorrectLinkIsNotRewrittenOnVerify()
+  await testReconciliationFailureNeverBlocksVerification()
   await testOriginatingPillarMismatch()
   await testGateRejectsVerificationBeforeExecution()
   await testNoDeployedArtifactIsInconclusive()

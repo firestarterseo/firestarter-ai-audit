@@ -40,6 +40,11 @@ function makeTable(tableName) {
           const rows = tables[tableName] || []
           const match = rows.find(r => Object.entries(filters).every(([k, v]) => r[k] === v))
           return match ? { data: match, error: null } : { data: null, error: { message: `${tableName} row not found` } }
+        },
+        async maybeSingle() {
+          const rows = tables[tableName] || []
+          const match = rows.find(r => Object.entries(filters).every(([k, v]) => r[k] === v))
+          return { data: match || null, error: null }
         }
       }
       return builder
@@ -79,7 +84,16 @@ const spies = {
   decrypt: makeSyncSpy((enc) => `plaintext-of:${enc}`),
   publishPageSchemaToWordPress: makeSpy(async () => ({ ok: true, postId: 42, updatedAt: '2026-09-04T00:00:00.000Z' })),
   resolvePageUrl: makeSyncSpy((siteUrl, p) => `${siteUrl}${p}`),
-  getPageWorkRow: makeSpy(async () => ({ opportunity_id: 'opp-1' })),
+  // HOTFIX (2026-09-04c) regression coverage: getPageWorkRow now backs ONLY
+  // the best-effort reconciliation/backfill, never the primary opportunity
+  // lookup (fingerprint does that -- see route.js's own header) -- default
+  // fixture below deliberately returns a row whose opportunity_id is
+  // ALREADY missing, mirroring the exact live Firestarter SEO /about/ bug
+  // this hotfix fixes, so every existing test not specifically about the
+  // reconciliation path still exercises the "stale/missing link" case by
+  // default rather than the easy, always-linked case.
+  getPageWorkRow: makeSpy(async () => ({ opportunity_id: null, page_url: 'https://example.com/about/' })),
+  linkOpportunity: makeSpy(async () => ({ id: 'pgw-1', opportunity_id: 'opp-1' })),
   executeOpportunity: makeSpy(async () => ({ ok: true }))
 }
 
@@ -87,7 +101,7 @@ require.cache[supabaseServerPath] = { id: supabaseServerPath, filename: supabase
 require.cache[wpCredentialsPath] = { id: wpCredentialsPath, filename: wpCredentialsPath, loaded: true, exports: { decrypt: spies.decrypt } }
 require.cache[wpPublishPath] = { id: wpPublishPath, filename: wpPublishPath, loaded: true, exports: { publishPageSchemaToWordPress: spies.publishPageSchemaToWordPress } }
 require.cache[pageAnalysisPath] = { id: pageAnalysisPath, filename: pageAnalysisPath, loaded: true, exports: { resolvePageUrl: spies.resolvePageUrl } }
-require.cache[schemaPageWorkPath] = { id: schemaPageWorkPath, filename: schemaPageWorkPath, loaded: true, exports: { getPageWorkRow: spies.getPageWorkRow } }
+require.cache[schemaPageWorkPath] = { id: schemaPageWorkPath, filename: schemaPageWorkPath, loaded: true, exports: { getPageWorkRow: spies.getPageWorkRow, linkOpportunity: spies.linkOpportunity } }
 require.cache[opportunityLifecyclePath] = { id: opportunityLifecyclePath, filename: opportunityLifecyclePath, loaded: true, exports: { executeOpportunity: spies.executeOpportunity } }
 
 const { POST } = require(routePath)
@@ -96,7 +110,7 @@ function resetAll() {
   tables = {
     clients: [{ id: 'client-1', url: 'https://example.com', wp_username: 'am', wp_app_password_encrypted: 'enc:abc' }],
     opportunities: [{
-      id: 'opp-1', client_id: 'client-1', originating_pillar: 'schema_structure',
+      id: 'opp-1', client_id: 'client-1', fingerprint: 'schema:/about', originating_pillar: 'schema_structure',
       detail: { path: '/about/' }, approval_status: 'approved', approved_prepared_work_id: 'pw-1',
       execution_status: 'not_started', execution_state: null
     }],
@@ -105,7 +119,8 @@ function resetAll() {
   spies.decrypt.reset((enc) => `plaintext-of:${enc}`)
   spies.publishPageSchemaToWordPress.reset(async () => ({ ok: true, postId: 42, updatedAt: '2026-09-04T00:00:00.000Z' }))
   spies.resolvePageUrl.reset((siteUrl, p) => `${siteUrl}${p}`)
-  spies.getPageWorkRow.reset(async () => ({ opportunity_id: 'opp-1' }))
+  spies.getPageWorkRow.reset(async () => ({ opportunity_id: null, page_url: 'https://example.com/about/' }))
+  spies.linkOpportunity.reset(async () => ({ id: 'pgw-1', opportunity_id: 'opp-1' }))
   spies.executeOpportunity.reset(async () => ({ ok: true }))
 }
 
@@ -279,10 +294,82 @@ async function testPreparedWorkRowNotApprovedBlocked() {
 
 async function testNoOpportunityForPageBlocked() {
   resetAll()
-  spies.getPageWorkRow.reset(async () => null)
+  tables.opportunities = [] // no row matches this client_id + fingerprint at all
   const res = await POST(req({ path: '/about/' }), ctx())
   assert.strictEqual(res.status, 400)
-  log('TEST (a page with no schema opportunity at all cannot be executed) PASSED')
+  log('TEST (a page with no schema opportunity at all -- no row matching this fingerprint -- cannot be executed) PASSED')
+}
+
+// ---------------------------------------------------------------------
+// HOTFIX (2026-09-04c) regression coverage -- the exact live bug: a fully
+// approved opportunity exists (found by fingerprint, the SAME lookup the
+// UI uses) but schema_page_work.opportunity_id is null/stale, either
+// because the link write never ran (a legacy/pre-linking opportunity) or
+// because it drifted. Execution must succeed anyway -- it must NEVER be
+// gated on that secondary link -- and the link should be backfilled
+// on-read rather than left stale, without ever creating a duplicate
+// opportunity.
+// ---------------------------------------------------------------------
+async function testMissingPageWorkLinkDoesNotBlockExecution() {
+  resetAll() // default fixture already has getPageWorkRow return opportunity_id: null
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200, 'a stale/missing schema_page_work link must never block execution of an opportunity the fingerprint lookup resolved correctly')
+  const body = await res.json()
+  assert.strictEqual(body.ok, true)
+  assert.strictEqual(spies.publishPageSchemaToWordPress.calls.length, 1)
+  log('TEST (a missing schema_page_work.opportunity_id link -- the exact live Firestarter SEO /about/ bug -- no longer blocks execution; the route resolves the opportunity by fingerprint instead) PASSED')
+}
+
+async function testMissingPageWorkLinkGetsBackfilledOnDeploy() {
+  resetAll()
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200)
+  assert.strictEqual(spies.linkOpportunity.calls.length, 1, 'a stale/missing link must be backfilled (reconciled) during a successful deploy')
+  assert.strictEqual(spies.linkOpportunity.calls[0][0].opportunityId, 'opp-1', 'reconciliation must link to the EXACT opportunity this route resolved -- never create or point at a different one')
+  assert.strictEqual(spies.linkOpportunity.calls[0][0].clientId, 'client-1')
+  log('TEST (deploy backfills the stale schema_page_work link to the exact opportunity it resolved, via the existing idempotent linkOpportunity() -- never creating a duplicate opportunity) PASSED')
+}
+
+async function testAlreadyCorrectLinkIsNotRewritten() {
+  resetAll()
+  spies.getPageWorkRow.reset(async () => ({ opportunity_id: 'opp-1', page_url: 'https://example.com/about/' }))
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200)
+  assert.strictEqual(spies.linkOpportunity.calls.length, 0, 'an already-correct link must not be rewritten on every deploy -- no noisy duplicate history event')
+  log('TEST (deploy makes no reconciliation write when schema_page_work is already linked to the correct opportunity) PASSED')
+}
+
+async function testReconciliationFailureNeverBlocksExecution() {
+  resetAll()
+  spies.linkOpportunity.reset(async () => { throw new Error('opportunity_id column is unique and already taken') })
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200, 'a reconciliation/backfill failure must never block an otherwise-valid deploy -- it is best-effort only')
+  const body = await res.json()
+  assert.strictEqual(body.ok, true)
+  assert.strictEqual(spies.publishPageSchemaToWordPress.calls.length, 1)
+  log('TEST (a linkOpportunity failure during reconciliation is swallowed -- the deploy itself still succeeds) PASSED')
+}
+
+async function testGetPageWorkRowFailureNeverBlocksExecution() {
+  resetAll()
+  spies.getPageWorkRow.reset(async () => { throw new Error('connection reset') })
+  const res = await POST(req({ path: '/about/' }), ctx())
+  assert.strictEqual(res.status ?? 200, 200, 'a failure reading schema_page_work (now only used for best-effort reconciliation) must never block execution of an opportunity already resolved by fingerprint')
+  log('TEST (a getPageWorkRow failure during reconciliation is swallowed -- execution proceeds on the fingerprint-resolved opportunity regardless) PASSED')
+}
+
+async function testNoDuplicateOpportunityIsEverCreated() {
+  // Structural check, same convention as prepare-work/route.test.js's own
+  // "never calls execution/verification/publish" test: this route must
+  // never even import a primitive capable of CREATING a new opportunity --
+  // reconciliation only ever links an EXISTING opportunityId to the
+  // existing schema_page_work row via linkOpportunity(), which itself
+  // never inserts into `opportunities`.
+  const source = require('fs').readFileSync(require.resolve(path.join(__dirname, 'route.js')), 'utf8')
+  for (const forbidden of ['qualifySchemaPageOpportunity', 'qualifyOpportunity', 'prepareWork', 'submitForApproval']) {
+    assert.ok(!source.includes(forbidden), `route.js must never import or call ${forbidden} -- it must never create a new opportunity, only resolve and reconcile an existing one`)
+  }
+  log('TEST (route.js never imports any opportunity-creating primitive -- reconciliation can only ever link to an EXISTING opportunity, never create a duplicate) PASSED')
 }
 
 async function testClientLookupMissing() {
@@ -308,6 +395,12 @@ async function main() {
   await testPreparedWorkRowNotApprovedBlocked()
   await testNoOpportunityForPageBlocked()
   await testClientLookupMissing()
+  await testMissingPageWorkLinkDoesNotBlockExecution()
+  await testMissingPageWorkLinkGetsBackfilledOnDeploy()
+  await testAlreadyCorrectLinkIsNotRewritten()
+  await testReconciliationFailureNeverBlocksExecution()
+  await testGetPageWorkRowFailureNeverBlocksExecution()
+  await testNoDuplicateOpportunityIsEverCreated()
   log('\nAll Phase 7 schema/execute-work route tests passed (mocked Supabase/WordPress/lifecycle, real deployable-artifact transform, no DB or network required).')
 }
 

@@ -3,8 +3,8 @@ const { decrypt } = require('../../../../../../lib/wpCredentials')
 const { publishPageSchemaToWordPress } = require('../../../../../../lib/wpPublish')
 const { resolvePageUrl } = require('../../../../../../lib/pageAnalysis')
 const { buildDeployableSchema, EXECUTION_BLOCKED_MESSAGE } = require('../../../../../../lib/schemaDeployableArtifact')
-const { getPageWorkRow } = require('../../../../../../lib/schemaPageWork')
-const { normalizeSchemaPagePath } = require('../../../../../../lib/schemaPageIdentity')
+const { getPageWorkRow, linkOpportunity } = require('../../../../../../lib/schemaPageWork')
+const { normalizeSchemaPagePath, buildSchemaOpportunityFingerprint } = require('../../../../../../lib/schemaPageIdentity')
 const { executeOpportunity } = require('../../../../../../lib/opportunityLifecycle')
 
 // A single external WordPress REST call -- same order of magnitude as the
@@ -26,7 +26,10 @@ const maxDuration = 30
 // APPROVAL GATE (instruction #9): every one of these is checked here,
 // server-side, and a request fails outright (never silently downgrades to
 // "manual") if any is not true:
-//   - a schema_page_work row exists for this path and is linked to an opportunity
+//   - a schema_structure opportunity exists for this exact page (resolved
+//     by fingerprint -- the SAME lookup the AM Review UI itself uses, per
+//     the 2026-09-04c hotfix; schema_page_work's own opportunity_id link is
+//     reconciled/backfilled from this, never trusted as the primary source)
 //   - that opportunity belongs to this client
 //   - its originating_pillar is schema_structure
 //   - its own recorded page (detail.path) matches the page being executed
@@ -63,33 +66,64 @@ async function POST(request, { params }) {
     return Response.json({ error: 'This client isn\'t connected to WordPress yet -- add a username and Application Password first.' }, { status: 400 })
   }
 
-  let pageWork
-  try {
-    pageWork = await getPageWorkRow(id, path)
-  } catch (e) {
-    return Response.json({ error: 'Could not look up this page\'s schema work.' }, { status: 500 })
+  // OPPORTUNITY RESOLUTION (2026-09-04c HOTFIX). Resolve by FINGERPRINT --
+  // the SAME authoritative lookup GET /prepare-work uses (and therefore the
+  // same one that decides whether the AM Review UI shows "APPROVED --
+  // READY FOR EXECUTION" in the first place) -- rather than through
+  // schema_page_work.opportunity_id. That link is a best-effort SECONDARY
+  // pointer: lib/schemaPageWork.js's own header is explicit that it is
+  // "never otherwise interpreted" beyond being set once by linkOpportunity()
+  // at the moment a page was originally prepared, and it can legitimately
+  // be null even when a real, unambiguous, fully-approved opportunity
+  // exists -- confirmed live: Firestarter SEO's /about/ opportunity was
+  // fully approved with an approved_prepared_work_id set, while its
+  // schema_page_work row's opportunity_id was null, so the OLD lookup here
+  // (via that link) failed with "No approved schema opportunity exists for
+  // this page yet" even though the UI -- resolving via fingerprint, same
+  // as below -- correctly showed the page as approved and executable. The
+  // fix is for the UI and this route to resolve from the exact same source
+  // of truth, so they can never disagree again.
+  const fingerprint = buildSchemaOpportunityFingerprint(path)
+  const { data: opportunity, error: oppError } = await supabase
+    .from('opportunities').select('*').eq('client_id', id).eq('fingerprint', fingerprint).maybeSingle()
+  if (oppError) {
+    return Response.json({ error: 'Could not look up this page\'s schema opportunity.' }, { status: 500 })
   }
-  if (!pageWork || !pageWork.opportunity_id) {
+  if (!opportunity) {
     return Response.json({ error: 'No approved schema opportunity exists for this page yet -- prepare and approve schema work first.' }, { status: 400 })
   }
 
-  const { data: opportunity, error: oppError } = await supabase
-    .from('opportunities').select('*').eq('id', pageWork.opportunity_id).eq('client_id', id).single()
-  if (oppError || !opportunity) {
-    return Response.json({ error: oppError?.message || 'Opportunity not found for this client.' }, { status: 404 })
+  // RECONCILIATION -- best-effort backfill of the SAME link, never a
+  // blocking check and never a duplicate opportunity: schema_page_work's
+  // opportunity_id is set (or corrected) to point at the exact opportunity
+  // this route just resolved authoritatively above, via the existing,
+  // already-idempotent linkOpportunity() primitive (it links to this EXACT
+  // existing opportunityId -- it never creates a new opportunity, and it is
+  // a no-op if the link is already correct). This keeps future reads
+  // through schema_page_work consistent without ever gating execution on
+  // that link being present. A failure here must never block executing an
+  // opportunity this route has already correctly resolved.
+  try {
+    const pageWork = await getPageWorkRow(id, path)
+    if (!pageWork || pageWork.opportunity_id !== opportunity.id) {
+      await linkOpportunity({ clientId: id, path, pageUrl: resolvePageUrl(client.url, path), opportunityId: opportunity.id, actor: 'system' })
+    }
+  } catch (e) {
+    console.error('[schema/execute-work] page-work reconciliation failed:', e)
   }
+
   if (opportunity.originating_pillar !== 'schema_structure') {
     return Response.json({ error: 'This opportunity does not belong to the Schema & Structure pillar.' }, { status: 400 })
   }
 
   // Target-page alignment (instruction #9's "target page matches the
   // Schema page-work record") -- the opportunity's OWN recorded page
-  // (set once, at qualification time, by lib/schemaOpportunity.js) must be
-  // the same page schema_page_work resolved `path` to. This is a defense-
-  // in-depth cross-check, not the primary lookup (getPageWorkRow above is
-  // what actually finds the opportunity) -- it exists so a future bug that
-  // ever mislinks a page-work row to the wrong opportunity fails loudly
-  // here instead of silently deploying to the wrong page's opportunity.
+  // (set once, at qualification time, by lib/schemaOpportunity.js) must
+  // match the page being executed. This is defense-in-depth, not the
+  // primary lookup (fingerprint resolution above is what actually finds
+  // the opportunity) -- it exists so a future bug that ever produces a
+  // fingerprint/detail.path mismatch fails loudly here instead of silently
+  // deploying to the wrong page's opportunity.
   const opportunityPath = opportunity.detail && typeof opportunity.detail.path === 'string' ? opportunity.detail.path : null
   if (!opportunityPath || normalizeSchemaPagePath(opportunityPath) !== normalizeSchemaPagePath(path)) {
     return Response.json({ error: 'EXECUTION BLOCKED — target page mismatch: this opportunity is not recorded against the page being executed.' }, { status: 409 })

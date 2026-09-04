@@ -2,7 +2,8 @@ const { getSupabaseServerClient } = require('../../../../../../lib/supabaseServe
 const { resolvePageUrl } = require('../../../../../../lib/pageAnalysis')
 const { fetchWebPage } = require('../../../../../../lib/webPageFetch')
 const { verifyDeployedSchema } = require('../../../../../../lib/schemaLiveVerification')
-const { getPageWorkRow } = require('../../../../../../lib/schemaPageWork')
+const { getPageWorkRow, linkOpportunity } = require('../../../../../../lib/schemaPageWork')
+const { buildSchemaOpportunityFingerprint } = require('../../../../../../lib/schemaPageIdentity')
 const { requestVerification, recordVerification } = require('../../../../../../lib/opportunityLifecycle')
 
 // A single live page fetch -- same order of magnitude as every other
@@ -50,21 +51,38 @@ async function POST(request, { params }) {
   }
   if (!client?.url) return Response.json({ error: 'This client has no site URL on file.' }, { status: 400 })
 
-  let pageWork
-  try {
-    pageWork = await getPageWorkRow(id, path)
-  } catch (e) {
-    return Response.json({ error: 'Could not look up this page\'s schema work.' }, { status: 500 })
+  // OPPORTUNITY RESOLUTION (2026-09-04c HOTFIX) -- resolve by FINGERPRINT,
+  // the SAME authoritative lookup GET /prepare-work (and execute-work/
+  // route.js, after the same hotfix there) use, rather than through
+  // schema_page_work.opportunity_id -- see execute-work/route.js's own
+  // header for the full root-cause writeup. That link is a best-effort
+  // secondary pointer that can legitimately be null even when a real,
+  // approved-and-executed opportunity exists, so it is never the primary
+  // lookup for whether this page can be verified.
+  const fingerprint = buildSchemaOpportunityFingerprint(path)
+  const { data: opportunity, error: oppError } = await supabase
+    .from('opportunities').select('*').eq('client_id', id).eq('fingerprint', fingerprint).maybeSingle()
+  if (oppError) {
+    return Response.json({ error: 'Could not look up this page\'s schema opportunity.' }, { status: 500 })
   }
-  if (!pageWork || !pageWork.opportunity_id) {
+  if (!opportunity) {
     return Response.json({ error: 'No schema opportunity exists for this page yet.' }, { status: 400 })
   }
 
-  const { data: opportunity, error: oppError } = await supabase
-    .from('opportunities').select('*').eq('id', pageWork.opportunity_id).eq('client_id', id).single()
-  if (oppError || !opportunity) {
-    return Response.json({ error: oppError?.message || 'Opportunity not found for this client.' }, { status: 404 })
+  // RECONCILIATION -- best-effort backfill of schema_page_work's own link,
+  // exactly as execute-work/route.js does (see that file for the full
+  // rationale): never blocking, never creates a duplicate opportunity,
+  // only ever points the existing page-work row at the exact opportunity
+  // already resolved above via the existing, idempotent linkOpportunity().
+  try {
+    const pageWork = await getPageWorkRow(id, path)
+    if (!pageWork || pageWork.opportunity_id !== opportunity.id) {
+      await linkOpportunity({ clientId: id, path, pageUrl: resolvePageUrl(client.url, path), opportunityId: opportunity.id, actor: 'system' })
+    }
+  } catch (e) {
+    console.error('[schema/verify-work] page-work reconciliation failed:', e)
   }
+
   if (opportunity.originating_pillar !== 'schema_structure') {
     return Response.json({ error: 'This opportunity does not belong to the Schema & Structure pillar.' }, { status: 400 })
   }
