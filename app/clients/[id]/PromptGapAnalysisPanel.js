@@ -5,13 +5,22 @@ import { useRouter } from 'next/navigation'
 
 // PROMPT-LEVEL GAP ANALYSIS -- v1 rebuild (2026-09-10). See
 // lib/promptGapAnalysis.js's header for the full rationale. Deliberately a
-// standalone panel, NOT one of the graded pillar tiles in PillarsBoard.js
-// and NOT wired into Opportunities -- this is diagnostic infrastructure
-// only, one prompt at a time, per explicit product direction.
+// standalone panel, NOT one of the graded pillar tiles in PillarsBoard.js --
+// this is diagnostic infrastructure, one prompt at a time.
 //
 // PROMPT -> WINNING COMPETITOR -> GAP -> CAUSE -> RECOMMENDED ACTION.
 // Every dimension can independently be 'gap' / 'no_gap' / 'insufficient_data'
 // -- insufficient_data is rendered plainly, never hidden or guessed past.
+//
+// OPPORTUNITY OUTCOME (2026-09-11): a validated finding (primary_gap/
+// secondary_gap) can now create or attach to a real row in the EXISTING
+// Opportunities system (see lib/promptGapOpportunities.js) -- this panel
+// only ever shows the RESULT of that (created / attached to an existing
+// opportunity / did not qualify, and why), never a task-management UI of
+// its own. `opportunityResults` only exists on an analysis just run in
+// THIS session (it's computed fresh per POST, not persisted on the row),
+// so it's simply absent -- and rendered as nothing -- on historical rows
+// loaded from GET.
 
 const DIMENSION_LABELS = {
   content: 'Content',
@@ -41,6 +50,42 @@ function GapDimension({ dimKey, dim, isPrimary, isSecondary }) {
       <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: 'var(--muted-2)', lineHeight: 1.6 }}>
         {(dim.evidence || []).map((e, i) => <li key={i}>{e}</li>)}
       </ul>
+    </div>
+  )
+}
+
+const OPPORTUNITY_OUTCOME_LABEL = {
+  created: 'Created a new Opportunity',
+  attached_existing: 'Attached to an existing Opportunity',
+  preserved_dismissed: 'Matched an existing Opportunity an AM already dismissed -- left as-is',
+  not_qualified: 'Did not qualify for an Opportunity'
+}
+const OPPORTUNITY_OUTCOME_TONE = { created: 'gap', attached_existing: 'watch', preserved_dismissed: 'watch', not_qualified: 'good' }
+
+// OpportunityOutcome -- shows the RESULT of connecting this analysis's
+// primary_gap/secondary_gap into the existing Opportunities system, never
+// a management UI of its own (no status changes, no approve/reject --
+// that's OpportunitiesManager.js's job, unchanged). One line per
+// dimension that was actually evaluated (only ever primary_gap/
+// secondary_gap -- see lib/promptGapOpportunities.js).
+function OpportunityOutcome({ opportunityResults }) {
+  const entries = Object.entries(opportunityResults || {}).filter(([k]) => k !== '_error')
+  if (opportunityResults._error) {
+    return <div className="text-tiny" style={{ color: 'var(--grade-f)', marginTop: 10 }}>Opportunity linking failed: {opportunityResults._error}</div>
+  }
+  if (entries.length === 0) return null
+  return (
+    <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+      <div className="text-small" style={{ fontWeight: 600, marginBottom: 6 }}>Opportunities</div>
+      {entries.map(([gapKey, result]) => (
+        <div key={gapKey} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+          <span className={`tag ${OPPORTUNITY_OUTCOME_TONE[result.status] || 'watch'}`}>{DIMENSION_LABELS[gapKey] || gapKey}</span>
+          <span className="text-small">{OPPORTUNITY_OUTCOME_LABEL[result.status] || result.status}</span>
+          {result.title && <span className="text-tiny text-muted">-- {result.title}</span>}
+          {result.reason && <span className="text-tiny text-muted">({result.reason})</span>}
+          {result.opportunityId && <span className="text-tiny text-muted">(see Opportunities under Competitive Position)</span>}
+        </div>
+      ))}
     </div>
   )
 }
@@ -88,8 +133,10 @@ function AnalysisResult({ analysis }) {
         </div>
       )}
 
+      {analysis.opportunityResults && <OpportunityOutcome opportunityResults={analysis.opportunityResults} />}
+
       <div className="text-tiny text-muted" style={{ marginTop: 10 }}>
-        Analyzed {new Date(analysis.analyzed_at).toLocaleString()}. Diagnostic only -- not wired into Opportunities.
+        Analyzed {new Date(analysis.analyzed_at).toLocaleString()}.
       </div>
     </div>
   )
