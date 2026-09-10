@@ -98,12 +98,24 @@ function ReviewDetail({ review }) {
       <div className="text-tiny text-muted">Page: {s.pageUrl}{typeof s.currentWordCount === 'number' ? ` (${s.currentWordCount} words currently)` : ''}</div>
       <FieldChange label="Title" current={s.title.current} proposed={s.title.proposed} />
       <FieldChange label="H1" current={s.h1.current} proposed={s.h1.proposed} />
+      {s.headingsToChange?.length > 0 && (
+        <details open>
+          <summary style={{ cursor: 'pointer' }}>H2/H3 changes ({s.headingsToChange.length})</summary>
+          {s.headingsToChange.map((h, i) => (
+            <div key={i} style={{ marginTop: 6 }}>
+              <div><strong>{h.heading_level}:</strong> {h.current_heading ? <><span style={{ textDecoration: 'line-through', color: 'var(--muted)' }}>{h.current_heading}</span> &rarr; </> : null}<span style={{ fontWeight: 600 }}>{h.new_heading}</span></div>
+              <div className="text-tiny text-muted">Placement: {h.placement}</div>
+            </div>
+          ))}
+        </details>
+      )}
       {s.contentAdditions?.length > 0 && (
-        <details>
-          <summary style={{ cursor: 'pointer' }}>Content additions ({s.contentAdditions.length})</summary>
+        <details open>
+          <summary style={{ cursor: 'pointer' }}>Content additions/rewrites ({s.contentAdditions.length})</summary>
           {s.contentAdditions.map((c, i) => (
             <div key={i} style={{ marginTop: 8 }}>
               <div style={{ fontWeight: 600 }}>{c.heading}</div>
+              {c.placement && <div className="text-tiny text-muted">Placement: {c.placement}</div>}
               <div className="text-tiny text-muted">{c.reason}</div>
               <div dangerouslySetInnerHTML={{ __html: c.content_html }} />
             </div>
@@ -117,6 +129,16 @@ function ReviewDetail({ review }) {
         <div><strong>Entity/location signals:</strong> {s.entityLocationSignals.map((e, i) => <div key={i}>{e.signal} -- {e.reason}</div>)}</div>
       )}
       {s.summaryOfChanges && <div className="text-tiny text-muted">{s.summaryOfChanges}</div>}
+      {s.completenessCheck && (
+        <div style={{ fontSize: 12 }}>
+          {s.completenessCheck.unaddressed?.length > 0 ? (
+            <div style={{ color: 'var(--red)' }}><strong>Not yet addressed by this plan:</strong> {s.completenessCheck.unaddressed.join(', ')}</div>
+          ) : (
+            <div style={{ color: 'var(--grade-a)' }}>Every diagnosed deficit is addressed by this plan.</div>
+          )}
+          {s.completenessCheck.note && <div className="text-tiny text-muted">{s.completenessCheck.note}</div>}
+        </div>
+      )}
       {s.siteQualityIssues?.length > 0 && (
         <div style={{ color: 'var(--grade-c)' }}><strong>Separate site-quality issue(s) noticed, not part of this plan:</strong> {s.siteQualityIssues.map((iss, i) => <div key={i}>{iss.evidence}</div>)}</div>
       )}
