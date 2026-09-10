@@ -21,8 +21,11 @@ const DIMENSION_LABELS = {
   technical: 'Technical'
 }
 
-const STATUS_LABEL = { losing: 'Losing', tied: 'Tied', winning: 'Winning', no_data: 'No data yet', no_signal: 'No signal' }
-const STATUS_TONE = { losing: 'gap', tied: 'watch', winning: 'good', no_data: 'watch', no_signal: 'watch' }
+// Corrected 2026-09-11 to match the multi-engine outcome vocabulary in
+// lib/promptGapAnalysis.js (LOSS/MIXED/etc. now reflect ALL engines in the
+// latest run, not one arbitrarily-picked engine's row).
+const STATUS_LABEL = { LOSS: 'Losing', MIXED: 'Mixed across engines', TIE: 'Tied', WIN: 'Winning', NO_DATA: 'No data yet', NO_SIGNAL: 'No signal' }
+const STATUS_TONE = { LOSS: 'gap', MIXED: 'gap', TIE: 'watch', WIN: 'good', NO_DATA: 'watch', NO_SIGNAL: 'watch' }
 
 function GapDimension({ dimKey, dim, isPrimary, isSecondary }) {
   if (!dim) return null
@@ -96,7 +99,7 @@ export default function PromptGapAnalysisPanel({ clientId, initialCandidates = [
   const router = useRouter()
   const [candidates] = useState(initialCandidates)
   const [analyses, setAnalyses] = useState(initialAnalyses)
-  const [selectedPrompt, setSelectedPrompt] = useState(candidates.find(c => c.status === 'losing')?.promptText || '')
+  const [selectedPrompt, setSelectedPrompt] = useState(candidates.find(c => c.status === 'LOSS' || c.status === 'MIXED')?.promptText || '')
   const [running, setRunning] = useState(false)
   const [error, setError] = useState(null)
 
