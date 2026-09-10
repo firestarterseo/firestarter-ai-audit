@@ -12,6 +12,8 @@ import AiGeoVisibilityWizard from './AiGeoVisibilityWizard'
 import CompetitivePositionWizard from './CompetitivePositionWizard'
 import SourceCitationWizard from './SourceCitationWizard'
 import { getSourceLandscape } from '../../../lib/sourceCitation'
+import PromptGapAnalysisPanel from './PromptGapAnalysisPanel'
+import { getPromptCandidates, getPersistedPromptGapAnalyses } from '../../../lib/promptGapAnalysis'
 
 export const dynamic = 'force-dynamic'
 
@@ -166,6 +168,22 @@ export default async function ClientDetailPage({ params }) {
     }
   }
 
+  // Prompt-Level Gap Analysis (foundation rebuild, 2026-09-10) -- pure reads
+  // only (no live fetches happen until an AM explicitly clicks "Analyze this
+  // prompt" inside the panel below), so always safe to load. Wrapped in
+  // try/catch for the same reason as sourceLandscape above: a page render
+  // must never fail because one optional panel's data fetch errored.
+  let promptGapCandidates = []
+  let promptGapAnalyses = []
+  try {
+    [promptGapCandidates, promptGapAnalyses] = await Promise.all([
+      getPromptCandidates(client.id),
+      getPersistedPromptGapAnalyses(client.id)
+    ])
+  } catch (e) {
+    console.error(`[prompt_gap_analysis] failed to load for client ${client.id}:`, e.message || e)
+  }
+
   // Pillars as plain data + pre-resolved children JSX, handed to the
   // (client-side) PillarsBoard for the tile/expand UI. The board itself
   // never needs to know what SchemaGenerator/TestPromptsManager/etc. are --
@@ -274,6 +292,12 @@ export default async function ClientDetailPage({ params }) {
       )}
 
       <PillarsBoard pillars={pillars} />
+
+      <PromptGapAnalysisPanel
+        clientId={client.id}
+        initialCandidates={promptGapCandidates}
+        initialAnalyses={promptGapAnalyses}
+      />
 
       <HistoryPanel runs={runs} />
     </div>
