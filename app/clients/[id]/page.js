@@ -13,7 +13,9 @@ import CompetitivePositionWizard from './CompetitivePositionWizard'
 import SourceCitationWizard from './SourceCitationWizard'
 import { getSourceLandscape } from '../../../lib/sourceCitation'
 import PromptGapAnalysisPanel from './PromptGapAnalysisPanel'
+import ContentExecutionPanel from './ContentExecutionPanel'
 import { getPromptCandidates, getPersistedPromptGapAnalyses } from '../../../lib/promptGapAnalysis'
+import { getPromptGapExecutionOpportunities } from '../../../lib/promptGapExecution'
 
 export const dynamic = 'force-dynamic'
 
@@ -168,6 +170,16 @@ export default async function ClientDetailPage({ params }) {
     }
   }
 
+  // Prompt Gap Analysis Opportunities awaiting execution -- wrapped the
+  // same defensive way as sourceLandscape above: a failure here must never
+  // take down the rest of the client page.
+  let promptGapExecutionOpportunities = []
+  try {
+    promptGapExecutionOpportunities = await getPromptGapExecutionOpportunities(client.id)
+  } catch (e) {
+    console.error(`[prompt_gap_execution] getPromptGapExecutionOpportunities failed for client ${client.id}:`, e.message || e)
+  }
+
   // Prompt-Level Gap Analysis (foundation rebuild, 2026-09-10) -- pure reads
   // only (no live fetches happen until an AM explicitly clicks "Analyze this
   // prompt" inside the panel below), so always safe to load. Wrapped in
@@ -298,6 +310,8 @@ export default async function ClientDetailPage({ params }) {
         initialCandidates={promptGapCandidates}
         initialAnalyses={promptGapAnalyses}
       />
+
+      <ContentExecutionPanel clientId={client.id} opportunities={promptGapExecutionOpportunities} />
 
       <HistoryPanel runs={runs} />
     </div>
