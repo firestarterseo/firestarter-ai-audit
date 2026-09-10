@@ -63,16 +63,18 @@ function ReviewDetail({ review }) {
         <div><strong>New URL:</strong> {s.newPage.url}</div>
         <div><strong>Title:</strong> {s.newPage.title}</div>
         <div><strong>H1:</strong> {s.newPage.h1}</div>
+        {s.newPage.titleH1Reason && <div className="text-tiny text-muted">Addresses: {s.newPage.titleH1Reason}</div>}
         <div><strong>Meta description:</strong> {s.newPage.metaDescription}</div>
         <div><strong>Angle:</strong> {s.newPage.angle}</div>
         {s.newPage.sections?.length > 0 && (
-          <details>
+          <details open>
             <summary style={{ cursor: 'pointer' }}>Body sections ({s.newPage.sections.length})</summary>
             {s.newPage.sections.map((sec, i) => (
               <div key={i} style={{ marginTop: 8 }}>
                 <div className="text-tiny text-muted" style={{ fontWeight: 700, textTransform: 'uppercase' }}>{sec.heading_level}</div>
                 <div style={{ fontWeight: 600 }}>{sec.heading}</div>
                 <div dangerouslySetInnerHTML={{ __html: sec.content_html }} />
+                {sec.addresses_gap && <div className="text-tiny text-muted">Addresses: {sec.addresses_gap}</div>}
               </div>
             ))}
           </details>
@@ -233,14 +235,28 @@ export default function ContentExecutionPanel({ clientId, opportunities }) {
           const verify = verifyResults[o.id]
           return (
             <div key={o.id}>
-              <OpportunityCard
-                opportunity={o}
-                priorityDimensions={o.priorityDimensions}
-                statusTrack={o.statusTrack}
-                preparedWork={o.preparedWork}
-                onApprove={busyId ? undefined : (opp) => runLifecycleAction(opp.id, 'approve')}
-                onReject={busyId ? undefined : (opp) => runLifecycleAction(opp.id, 'reject', { reason: 'am_do_nothing' })}
-              />
+              {(() => {
+                // The approved version must be the EXACT one just reviewed
+                // (or, absent a loaded review, the latest content_brief/
+                // content_draft version) -- never approve with no
+                // preparedWorkId, or execution-verify has nothing to verify
+                // against (it always re-reads approved_prepared_work_id
+                // fresh, never "whatever's newest" -- see lib/promptGapExecution.js).
+                const latestContentWork = (o.preparedWork || [])
+                  .filter(pw => pw.artifact_type === 'content_brief' || pw.artifact_type === 'content_draft')
+                  .reduce((latest, pw) => (!latest || pw.version > latest.version) ? pw : latest, null)
+                const preparedWorkIdToApprove = review?.preparedWork?.id || latestContentWork?.id || null
+                return (
+                  <OpportunityCard
+                    opportunity={o}
+                    priorityDimensions={o.priorityDimensions}
+                    statusTrack={o.statusTrack}
+                    preparedWork={o.preparedWork}
+                    onApprove={(busyId || !preparedWorkIdToApprove) ? undefined : (opp) => runLifecycleAction(opp.id, 'approve', { preparedWorkId: preparedWorkIdToApprove })}
+                    onReject={busyId ? undefined : (opp) => runLifecycleAction(opp.id, 'reject', { reason: 'am_do_nothing' })}
+                  />
+                )
+              })()}
               <div className="cta-row" style={{ marginTop: 6 }}>
                 <button className="btn btn-secondary" disabled={busyId === o.id} onClick={() => loadReview(o.id)}>
                   {busyId === o.id ? 'Loading...' : review ? 'Refresh current vs. proposed' : 'Show current vs. proposed'}
