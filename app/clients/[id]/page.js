@@ -311,7 +311,7 @@ export default async function ClientDetailPage({ params }) {
         initialAnalyses={promptGapAnalyses}
       />
 
-      <ContentExecutionPanel clientId={client.id} opportunities={promptGapExecutionOpportunities} />
+      <ContentExecutionPanel clientId={client.id} clientName={client.name} opportunities={promptGapExecutionOpportunities} />
 
       <HistoryPanel runs={runs} />
     </div>
