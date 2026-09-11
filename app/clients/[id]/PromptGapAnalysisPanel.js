@@ -101,7 +101,7 @@ function AnalysisResult({ analysis }) {
   const winningCompetitors = Array.isArray(analysis.winning_competitors) ? analysis.winning_competitors : []
 
   return (
-    <div className="card" style={{ marginTop: 12 }}>
+    <div className="card" style={{ padding: 18, marginTop: 12 }}>
       <div className="text-small text-muted" style={{ marginBottom: 4 }}>Prompt</div>
       <div style={{ fontWeight: 600, marginBottom: 10 }}>&ldquo;{analysis.prompt_text}&rdquo;</div>
 
@@ -175,7 +175,7 @@ export default function PromptGapAnalysisPanel({ clientId, initialCandidates = [
 
   if (candidates.length === 0) {
     return (
-      <div className="card card-empty" style={{ marginTop: 24 }}>
+      <div className="card card-empty" style={{ padding: 18, marginTop: 24 }}>
         No tracked test prompts exist yet for this client -- add some under AI &amp; GEO Visibility first.
       </div>
     )
