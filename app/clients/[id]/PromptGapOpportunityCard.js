@@ -415,6 +415,11 @@ export default function PromptGapOpportunityCard({
 
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 16, boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Which Opportunity this card even is -- omitted from the first cut
+          of this redesign and only caught once multiple active cards were
+          visible side by side with no way to tell them apart at a glance. */}
+      <div className="text-small" style={{ fontWeight: 600 }}>{o.title}</div>
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
         <div>
           <div className="text-tiny text-muted" style={{ textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 2 }}>Recommendation</div>
