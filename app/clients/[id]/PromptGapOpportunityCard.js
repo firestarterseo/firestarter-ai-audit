@@ -58,6 +58,25 @@ const DEFICIT_FOCUS_PHRASE = {
   internal_link_support: 'in internal linking'
 }
 
+// formatTimestamp -- an EXPLICIT locale + UTC timeZone (never the ambient
+// server/browser default) so the rendered string is byte-identical on the
+// server-rendered HTML and the client hydration pass. A bare
+// `new Date(x).toLocaleString()` -- used elsewhere in this codebase, e.g.
+// PromptGapAnalysisPanel.js -- depends on the runtime's local timezone,
+// which differs between Vercel's server (UTC) and a browser (whatever the
+// viewer is in); inside a `<details>` that can render while closed (this
+// one's default state), that mismatch still hydrates and throws a real
+// React error (#418) even though nothing is visibly wrong -- confirmed
+// live while building this card. Scoped to this new file only; not a
+// claim that the pre-existing pattern elsewhere is broken today.
+function formatTimestamp(iso) {
+  try {
+    return new Date(iso).toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short' }) + ' UTC'
+  } catch (e) {
+    return iso
+  }
+}
+
 function domainLabel(domain) {
   if (!domain) return null
   const base = String(domain).replace(/\.[a-z.]+$/i, '').split('.').pop()
@@ -218,8 +237,20 @@ function FieldChange({ label, current, proposed }) {
 // with the exact same rendering as an active card's "View proposed work"
 // -- one source of truth for "how do we display a review payload," not a
 // duplicated copy.
-export function ProposedWorkDetail({ review }) {
-  if (!review) return <div className="text-tiny text-muted">Click &ldquo;Review proposed changes&rdquo; to load the current plan.</div>
+export function ProposedWorkDetail({ review, onLoadReview, busy }) {
+  if (!review) {
+    // No primary CTA left to load this once the Opportunity has moved past
+    // the review stage (approved / handed off / verifying) -- a small,
+    // secondary control here, not competing with the card's ONE prominent
+    // action, is the only way to still pull it up on demand.
+    return onLoadReview ? (
+      <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled={busy} onClick={onLoadReview}>
+        {busy ? 'Loading...' : 'Load proposed work'}
+      </button>
+    ) : (
+      <div className="text-tiny text-muted">No proposed-work detail loaded yet.</div>
+    )
+  }
   const s = review.changeSummary
   if (!s) return null
 
@@ -345,7 +376,7 @@ function HistoryDetail({ opportunity, verify }) {
         <div>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>Latest verification attempt</div>
           <div className="text-tiny text-muted" style={{ marginBottom: 4 }}>
-            {o.verification_state?.checked_at ? new Date(o.verification_state.checked_at).toLocaleString() : 'Just now'} -- {o.verification_status}
+            {o.verification_state?.checked_at ? formatTimestamp(o.verification_state.checked_at) : 'Just now'} -- {o.verification_status}
           </div>
           {((verify?.checks) || o.verification_state?.evidence || []).map((c, i) => (
             <div key={i} className="text-tiny" style={{ color: c.matches ? 'var(--grade-a)' : 'var(--red)' }}>
@@ -396,32 +427,43 @@ export default function PromptGapOpportunityCard({
 
       <DecisionMetrics priorityDimensions={o.priorityDimensions} />
 
+      {/* EXACTLY ONE prominent CTA per state (2026-09-11 fix) -- the first
+          version of this card could show "Review proposed changes" AND the
+          verify button at once, because "has a review been loaded THIS
+          BROWSER SESSION" and "how far along is the actual lifecycle" are
+          two different questions: an Opportunity already past approval
+          still showed the review button on a fresh page load, before
+          anyone clicked anything, simply because `review` state hadn't
+          been fetched yet. The chain below is ordered by lifecycle state
+          alone (approval_status/execution_status/verification_status),
+          never by whether review happens to be loaded in memory -- once an
+          Opportunity is approved, "Review proposed changes" is no longer
+          the decision point regardless of local state. (The plan itself is
+          still reachable via a small secondary control inside "View
+          proposed work" -- see ProposedWorkDetail's onLoadReview fallback.) */}
       <div className="cta-row" style={{ marginTop: 2, alignItems: 'center', gap: 10 }}>
-        {!review && (
-          <button className="btn btn-primary" disabled={busy} onClick={onLoadReview}>
-            {busy ? 'Loading...' : 'Review proposed changes'}
+        {o.verification_status === 'verified' ? (
+          <span style={{ color: 'var(--grade-a)', fontWeight: 600, fontSize: 13 }}>&#10003; Verified live</span>
+        ) : ['handed_off', 'human_completed', 'human_claimed_complete'].includes(o.execution_status) ? (
+          <button className="btn btn-primary" disabled={busy} onClick={onMarkLiveAndVerify}>
+            {busy ? 'Verifying...' : (o.verification_status === 'failed_verification' ? "I've corrected it -- verify now" : "I've made these changes live -- verify now")}
           </button>
-        )}
-        {review && o.approval_status !== 'approved' && (
+        ) : o.execution_status === 'handoff_requested' ? (
+          <button className="btn btn-primary" disabled={busy} onClick={onRecordHandoff}>Record handoff delivered</button>
+        ) : o.approval_status === 'approved' ? (
+          <button className="btn btn-primary" disabled={busy} onClick={onRequestHandoff}>Request handoff (ready to publish)</button>
+        ) : review ? (
           <>
             <button className="btn btn-primary" disabled={busy} onClick={onApprove}>Approve</button>
             <button className="text-tiny text-muted" style={{ background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', padding: 0 }} disabled={busy} onClick={onReject}>
               Do nothing (reject)
             </button>
           </>
-        )}
-        {o.approval_status === 'approved' && !['handoff_requested', 'handed_off', 'human_completed', 'human_claimed_complete'].includes(o.execution_status) && (
-          <button className="btn btn-primary" disabled={busy} onClick={onRequestHandoff}>Request handoff (ready to publish)</button>
-        )}
-        {o.execution_status === 'handoff_requested' && (
-          <button className="btn btn-primary" disabled={busy} onClick={onRecordHandoff}>Record handoff delivered</button>
-        )}
-        {['handed_off', 'human_completed', 'human_claimed_complete'].includes(o.execution_status) && o.verification_status !== 'verified' && (
-          <button className="btn btn-primary" disabled={busy} onClick={onMarkLiveAndVerify}>
-            {busy ? 'Verifying...' : (o.verification_status === 'failed_verification' ? "I've corrected it -- verify now" : "I've made these changes live -- verify now")}
+        ) : (
+          <button className="btn btn-primary" disabled={busy} onClick={onLoadReview}>
+            {busy ? 'Loading...' : 'Review proposed changes'}
           </button>
         )}
-        {o.verification_status === 'verified' && <span style={{ color: 'var(--grade-a)', fontWeight: 600, fontSize: 13 }}>&#10003; Verified live</span>}
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 2 }}>
@@ -434,7 +476,7 @@ export default function PromptGapOpportunityCard({
             <summary className="text-small" style={{ cursor: 'pointer', fontWeight: 600 }}>{label}</summary>
             <div style={{ marginTop: 8, paddingLeft: 4 }}>
               {key === 'evidence' && <EvidenceDetail opportunity={o} />}
-              {key === 'work' && <ProposedWorkDetail review={review} />}
+              {key === 'work' && <ProposedWorkDetail review={review} onLoadReview={onLoadReview} busy={busy} />}
               {key === 'history' && <HistoryDetail opportunity={o} verify={verify} />}
             </div>
           </details>
