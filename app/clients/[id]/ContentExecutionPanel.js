@@ -43,6 +43,62 @@ const ACTION_TYPE_LABEL = {
   fix_technical_schema: 'Fix via Schema Wizard'
 }
 
+// DISPOSITION_REASON_LABEL -- human-readable text for
+// lib/opportunityLifecycle.js's DISPOSITION_REASONS enum, only the values
+// this panel's own dismissals actually use (reject/duplicate/weak-evidence
+// paths) plus a couple of generically-likely ones. Falls back to the raw
+// enum value itself for anything not listed here -- never hidden, just
+// unformatted.
+const DISPOSITION_REASON_LABEL = {
+  weak_evidence: 'The evidence that originally supported this no longer holds up',
+  duplicate: 'Superseded by a different, correctly-targeted Opportunity',
+  issue_no_longer_exists: 'The underlying issue no longer exists',
+  am_do_nothing: 'An AM marked this Do Nothing',
+  am_rejected: 'An AM rejected this',
+  low_commercial_relevance: 'Low commercial relevance',
+  already_adequately_represented: 'Already adequately represented',
+  no_legitimate_intervention: 'No legitimate intervention available'
+}
+
+// DismissedOpportunityNotice -- the MAIN, active-looking summary for a
+// dismissed/invalidated Opportunity (2026-09-11 fix). Previously a
+// dismissed Opportunity still rendered its full OpportunityCard (Finding &
+// evidence, Prepared work) exactly like an active one, with only a small
+// "Do Nothing" pill to signal otherwise -- easy to misread the stale
+// evidence/plan below it as a live recommendation, especially once the
+// gap_diagnosis snapshot on `detail` (frozen at whatever it was on the
+// analysis run that qualified the Opportunity) no longer matches a LATER,
+// corrected analysis that found no gap and is why this got dismissed in
+// the first place -- exactly what happened to the real
+// "custom windows denver" / /denver-custom-window-replacement/ Opportunity
+// after the prompt-location fix. Rather than trying to keep `detail`
+// "live-synced" to the latest prompt_gap_analyses row (a real change to
+// gap-analysis/qualification plumbing, out of scope here), this shows the
+// disposition reason/detail -- already durably stored on the row via
+// rejectOpportunity's disposition_reason/disposition_detail columns --
+// as the headline fact, and demotes the stale evidence/plan to a clearly-
+// labeled, collapsed history section (see the render loop below).
+function DismissedOpportunityNotice({ opportunity }) {
+  const o = opportunity
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 16, background: 'var(--bg-alt)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ fontWeight: 700, fontSize: 15 }}>{o.title}</div>
+        <span style={{ padding: '3px 10px', borderRadius: 999, background: 'var(--muted)', color: '#fff', fontSize: 12, fontWeight: 600 }}>Do Nothing</span>
+      </div>
+      <div style={{ fontSize: 13, marginTop: 8 }}>
+        <strong>Why:</strong> {DISPOSITION_REASON_LABEL[o.disposition_reason] || o.disposition_reason || 'No longer supported by the current gap analysis.'}
+      </div>
+      {o.disposition_detail?.note && (
+        <p className="text-small" style={{ marginTop: 6 }}>{o.disposition_detail.note}</p>
+      )}
+      <p className="text-tiny text-muted" style={{ marginTop: 8 }}>
+        This Opportunity is dismissed -- nothing below is an active recommendation. Any prepared work generated before this dismissal is kept for history only (see &ldquo;Previous analysis&rdquo;).
+      </p>
+    </div>
+  )
+}
+
 function FieldChange({ label, current, proposed }) {
   if (!proposed) return null
   return (
@@ -262,6 +318,48 @@ export default function ContentExecutionPanel({ clientId, opportunities }) {
         {list.map(o => {
           const review = reviews[o.id]
           const verify = verifyResults[o.id]
+          const isDismissed = o.status === 'dismissed'
+          const hasHistoryToShow = (o.preparedWork?.length > 0) || (o.evidence?.length > 0)
+
+          if (isDismissed) {
+            return (
+              <div key={o.id}>
+                <DismissedOpportunityNotice opportunity={o} />
+                {hasHistoryToShow && (
+                  <details style={{ marginTop: 6 }}>
+                    <summary className="text-tiny text-muted" style={{ cursor: 'pointer' }}>
+                      Previous analysis (superseded -- {o.preparedWork?.length || 0} prepared-work version{o.preparedWork?.length === 1 ? '' : 's'})
+                    </summary>
+                    <div style={{ marginTop: 8, opacity: 0.65 }}>
+                      <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
+                        Kept for audit purposes only -- generated before this Opportunity was dismissed, no longer an active recommendation. No approve/execute/verify actions are available here.
+                      </p>
+                      <OpportunityCard
+                        opportunity={o}
+                        priorityDimensions={o.priorityDimensions}
+                        statusTrack={o.statusTrack}
+                        preparedWork={o.preparedWork}
+                      />
+                      <div className="cta-row" style={{ marginTop: 6 }}>
+                        <button className="btn btn-secondary" disabled={busyId === o.id} onClick={() => loadReview(o.id)}>
+                          {busyId === o.id ? 'Loading...' : review ? 'Refresh historical plan' : 'Show historical plan (superseded)'}
+                        </button>
+                      </div>
+                      {review && (
+                        <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 10, marginTop: 6, background: 'var(--bg-alt)' }}>
+                          <div className="text-tiny text-muted" style={{ fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>
+                            SUPERSEDED -- {ACTION_TYPE_LABEL[review.actionType] || review.actionType}
+                          </div>
+                          <ReviewDetail review={review} />
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )
+          }
+
           return (
             <div key={o.id}>
               {(() => {
