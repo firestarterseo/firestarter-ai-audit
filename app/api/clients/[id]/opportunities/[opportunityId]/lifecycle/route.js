@@ -1,7 +1,7 @@
 const { getSupabaseServerClient } = require('../../../../../../../lib/supabaseServer')
 const {
   approveOpportunity, rejectOpportunity, requestHandoff, recordHandoff,
-  recordHumanCompleted, requestVerification, recordVerification, prepareWork
+  recordHumanCompleted, recordHumanClaimedComplete, requestVerification, recordVerification, prepareWork
 } = require('../../../../../../../lib/opportunityLifecycle')
 
 // POST -- Phase 3 shared-lifecycle dispatcher for one opportunity
@@ -123,6 +123,19 @@ const ACTIONS = {
   },
   record_human_completed: {
     run: (opportunityId, body) => recordHumanCompleted(opportunityId, {
+      notes: body.notes || null,
+      actor: 'am'
+    })
+  },
+  // record_human_claimed_complete (2026-09-11): same primitive as
+  // record_human_completed above -- an additive, more honestly-named
+  // execution_status (see lib/opportunityLifecycle.js#recordHumanClaimedComplete)
+  // that reads as a CLAIM pending verification, never success by itself.
+  // New callers (the prompt-gap content execution panel) use this one;
+  // record_human_completed is untouched for existing callers (Schema
+  // Wizard, Source & Citation Wizard).
+  record_human_claimed_complete: {
+    run: (opportunityId, body) => recordHumanClaimedComplete(opportunityId, {
       notes: body.notes || null,
       actor: 'am'
     })

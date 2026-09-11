@@ -17,9 +17,20 @@
 // No automated WordPress publish exists for page content today (only
 // JSON-LD schema does, via lib/wpPublish.js) -- so "Publish" here means the
 // AM applies the approved change in WordPress by hand, using the review
-// below as their instructions, then confirms completion through the same
-// handoff controls SourceCitationWizard already uses. This never auto-
-// publishes anything.
+// below as their instructions.
+//
+// CLAIM vs. VERIFIED (2026-09-11 correction): a real run showed
+// "Mark published in WordPress" sitting on screen as its own finished-
+// looking step, with a separate "Re-fetch & verify" button next to it --
+// easy to misread the first click alone as success. markLiveAndVerify()
+// below is now the ONE action: it records the human's claim
+// (lib/opportunityLifecycle.js#recordHumanClaimedComplete -- an additive,
+// more honestly-named execution_status, not a replacement for
+// recordHumanCompleted, which SourceCitationWizard/SchemaWizard keep using
+// unchanged) and immediately re-fetches + compares the live page in the
+// same click. A failed check leaves the Opportunity open with the
+// approved plan and evidence intact; the SAME button retries verification
+// with no re-handoff and no plan regeneration required.
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -206,14 +217,32 @@ export default function ContentExecutionPanel({ clientId, opportunities }) {
     }
   }
 
-  async function runVerify(opportunityId) {
+  // markLiveAndVerify -- the ONE action for "I made the change, check it."
+  // Deliberately a single button/handler, not two: recording
+  // "human_claimed_complete" on its own used to sit on screen looking like
+  // a finished step with no forced next action -- easy to misread as
+  // success. This always immediately re-fetches the live page and records
+  // a real verified/failed_verification result right after the claim, and
+  // is the SAME action on a retry after a failed verification (the AM
+  // fixes the live page, clicks this again -- no need to re-claim, re-
+  // approve, or regenerate the plan; lib/opportunityLifecycle.js's verify
+  // gate only cares that execution_status is already claimed-complete).
+  async function markLiveAndVerify(opportunityId) {
     setBusyId(opportunityId)
     setError(null)
     try {
-      const res = await fetch(`/api/clients/${clientId}/opportunities/${opportunityId}/execution-verify`, { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Verification failed.')
-      setVerifyResults(prev => ({ ...prev, [opportunityId]: data.result }))
+      const claimRes = await fetch(`/api/clients/${clientId}/opportunities/${opportunityId}/lifecycle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'record_human_claimed_complete', notes: "AM confirmed: I've made these changes live in WordPress." })
+      })
+      const claimData = await claimRes.json()
+      if (!claimRes.ok) throw new Error(claimData.error || 'Could not record the claimed change.')
+
+      const verifyRes = await fetch(`/api/clients/${clientId}/opportunities/${opportunityId}/execution-verify`, { method: 'POST' })
+      const verifyData = await verifyRes.json()
+      if (!verifyRes.ok) throw new Error(verifyData.error || 'Verification failed to run.')
+      setVerifyResults(prev => ({ ...prev, [opportunityId]: verifyData.result }))
       router.refresh()
     } catch (err) {
       setError(err.message)
@@ -226,7 +255,7 @@ export default function ContentExecutionPanel({ clientId, opportunities }) {
     <div className="card" style={{ padding: 18, marginTop: 14 }}>
       <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Content &amp; Relevance execution</div>
       <p className="text-small text-muted" style={{ margin: '0 0 12px' }}>
-        Prepare &rarr; Review &rarr; Approve &rarr; Publish &rarr; Re-fetch &rarr; Verify, for Opportunities generated from Prompt Gap Analysis. Nothing here publishes automatically -- there is no automated WordPress path for page content today (only JSON-LD schema has one), so publishing means an AM applies the approved change in WordPress by hand using the reviewed plan below, then confirms completion; the verify step then really re-fetches the live page rather than asking for a self-attestation.
+        Prepare &rarr; Review &rarr; Approve &rarr; Publish &rarr; Re-fetch &rarr; Verify, for Opportunities generated from Prompt Gap Analysis. Nothing here publishes automatically -- there is no automated WordPress path for page content today (only JSON-LD schema has one), so publishing means an AM applies the approved change in WordPress by hand using the reviewed plan below. Clicking &ldquo;I&rsquo;ve made these changes live&rdquo; only records a CLAIM, never a completion -- it always immediately re-fetches the real live page and checks it against the approved plan, and the Opportunity only ever moves to Verified if that check actually passes. A failed check keeps the Opportunity open with the approved plan and the failed-check evidence intact -- fix the live page and click the same button again to retry, with no need to redo handoff or regenerate anything.
       </p>
       {error && <p className="field-error" style={{ marginBottom: 10 }}>{error}</p>}
       <div style={{ display: 'grid', gap: 12 }}>
@@ -271,9 +300,16 @@ export default function ContentExecutionPanel({ clientId, opportunities }) {
                 </div>
               )}
 
-              {o.execution_capability === 'red' && o.approval_status === 'approved' && o.execution_status !== 'human_completed' && (
+              {/* CLAIMED_COMPLETE_STATUSES: 'human_completed' (legacy rows,
+                  same semantics) and 'human_claimed_complete' (the current,
+                  more honestly-named value -- see
+                  lib/opportunityLifecycle.js#recordHumanClaimedComplete)
+                  are treated identically here -- this is a naming fix, not
+                  a new rule, so an opportunity already at the old value
+                  keeps working exactly the same. */}
+              {o.execution_capability === 'red' && o.approval_status === 'approved' && o.verification_status !== 'verified' && (
                 <div className="cta-row" style={{ marginTop: 6 }}>
-                  {o.execution_status !== 'handoff_requested' && o.execution_status !== 'handed_off' && (
+                  {!['handoff_requested', 'handed_off', 'human_completed', 'human_claimed_complete'].includes(o.execution_status) && (
                     <button className="btn btn-secondary" disabled={busyId === o.id} onClick={() => runLifecycleAction(o.id, 'request_handoff', { instructions: 'Reviewed plan above is ready for manual WordPress publish.' })}>
                       Request handoff (ready to publish)
                     </button>
@@ -283,19 +319,19 @@ export default function ContentExecutionPanel({ clientId, opportunities }) {
                       Record handoff delivered
                     </button>
                   )}
-                  {o.execution_status === 'handed_off' && (
-                    <button className="btn btn-secondary" disabled={busyId === o.id} onClick={() => runLifecycleAction(o.id, 'record_human_completed', { notes: 'AM confirmed the change was published in WordPress.' })}>
-                      Mark published in WordPress
+                  {/* ONE button covers both the first claim+verify AND every
+                      retry after a failed_verification -- clicking it again
+                      never re-does handoff or regenerates the plan, it just
+                      claims (idempotently) and immediately re-verifies. The
+                      label never claims the work is done; it only ever asks
+                      the AM to confirm the live state and check it. */}
+                  {(o.execution_status === 'handed_off' || ['human_completed', 'human_claimed_complete'].includes(o.execution_status)) && (
+                    <button className="btn btn-secondary" disabled={busyId === o.id} onClick={() => markLiveAndVerify(o.id)}>
+                      {busyId === o.id
+                        ? 'Verifying...'
+                        : (o.verification_status === 'failed_verification' ? "I've corrected it -- verify now" : "I've made these changes live -- verify now")}
                     </button>
                   )}
-                </div>
-              )}
-
-              {['executed', 'human_completed'].includes(o.execution_status) && (
-                <div className="cta-row" style={{ marginTop: 6 }}>
-                  <button className="btn btn-secondary" disabled={busyId === o.id} onClick={() => runVerify(o.id)}>
-                    {busyId === o.id ? 'Re-fetching live page...' : 'Re-fetch & verify live page'}
-                  </button>
                 </div>
               )}
               <VerifyResult verify={verify} />

@@ -5,9 +5,12 @@ const { verifyExecutionReview } = require('../../../../../../../lib/promptGapExe
 // checks whether the APPROVED content plan's title/H1 are actually
 // present, then records the result via lib/opportunityLifecycle.js's
 // requestVerification/recordVerification (same gate Schema's verify-work
-// route relies on -- throws unless execution_status is already 'executed'
-// or 'human_completed', i.e. the AM has already published the change).
-// Never accepts a payload from the request body -- always re-reads the
+// route relies on -- throws unless execution_status is already 'executed',
+// 'human_completed', or 'human_claimed_complete', i.e. the AM has claimed
+// the change is live -- a claim, never itself proof; this route's job is
+// to actually check it). Re-callable after a failed_verification with no
+// other state change required. Never accepts a payload from the request
+// body -- always re-reads the
 // opportunity's approved_prepared_work_id fresh from the DB, same anti-
 // tamper provenance rule as schema/execute-work/route.js.
 async function POST(request, { params }) {
