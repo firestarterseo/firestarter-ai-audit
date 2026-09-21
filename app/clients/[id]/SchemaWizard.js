@@ -5,7 +5,10 @@ import SchemaGenerator from './SchemaGenerator'
 import { CheckRow, IssuesList, pillarHeadline, StepChips } from './PillarsBoard'
 import { computeRecommendedSet } from '../../../lib/schemaPagePriority'
 import { toggleQueuedPath, resolveOpenPath, resolveActiveWorkItem } from '../../../lib/schemaPageSelection'
-import { deriveHomepageState, deriveStateFromAnalysis, deriveCompletionOverride, excludedPathsFromStates, getPageState } from '../../../lib/schemaPageLifecycle'
+import {
+  deriveHomepageState, deriveStateFromAnalysis, deriveCompletionOverride, excludedPathsFromStates, getPageState,
+  splitQueuedDossiers, isBatchEligibleState, deriveCurrentSchemaStatus, classifyWorkItems
+} from '../../../lib/schemaPageLifecycle'
 import { mergeDurableQueuedPaths, mergeDurableAnalyses } from '../../../lib/schemaPageHydration'
 import { runWithBoundedConcurrency } from '../../../lib/schemaBatchAnalysis'
 
@@ -42,6 +45,27 @@ const PAGE_STATE_TONE = {
   NO_ACTION_NEEDED: 'good',
   WORK_IN_PROGRESS: 'caution',
   COMPLETED: 'good'
+}
+
+// CURRENT_STATUS_PILL_TONE -- maps lib/schemaPageLifecycle.js's
+// deriveCurrentSchemaStatus() codes onto this file's existing `status
+// <tone>` pill vocabulary (muted/bad/good/caution -- see PAGE_STATE_TONE
+// above), for the ONE spot (the Schema work queue row) that shows the
+// unified current-status label in that pill instead of an issue-badge.
+// PreparedWorkPanel's own badge uses `currentStatus.tone` directly
+// (issue-passing/issue-minor/...) since it already sits in issue-badge
+// context there -- two existing CSS vocabularies, same underlying value,
+// never two DIFFERENT status values shown for one page at once anymore.
+const CURRENT_STATUS_PILL_TONE = {
+  COMPLETED: 'good',
+  VERIFICATION_FAILED: 'bad',
+  DEPLOYED: 'caution',
+  APPROVED: 'caution',
+  AWAITING_APPROVAL: 'caution',
+  REJECTED: 'bad',
+  READY_TO_PREPARE: 'bad',
+  NO_ACTION_NEEDED: 'good',
+  NOT_ANALYZED: 'muted'
 }
 
 // PAGE_TYPE_OPTIONS / PRIORITY_TIER_OPTIONS (the "All discovered pages"
@@ -478,12 +502,6 @@ function isEligibleForPreparedWorkDisplay(analysis) {
   return false
 }
 
-const APPROVAL_STATUS_COPY = {
-  pending: { label: 'Pending AM review', tone: 'issue-minor' },
-  approved: { label: 'Approved -- ready for execution (manual/RED)', tone: 'issue-passing' },
-  rejected: { label: 'Rejected', tone: 'issue-critical' }
-}
-
 function SchemaChangeList({ title, items, tone }) {
   if (!items || items.length === 0) return null
   return (
@@ -659,13 +677,25 @@ function PreparedWorkPanel({
             </>
           )}
 
-          {opportunity.approval_status && APPROVAL_STATUS_COPY[opportunity.approval_status] && (
-            <div style={{ margin: '4px 0 10px' }}>
-              <span className={`issue-badge ${APPROVAL_STATUS_COPY[opportunity.approval_status].tone}`}>
-                {APPROVAL_STATUS_COPY[opportunity.approval_status].label}
-              </span>
-            </div>
-          )}
+          {/* CURRENT STATUS PRECEDENCE (2026-09-21 WORKFLOW CORRECTION, item
+              C) -- this used to render opportunity.approval_status's own
+              copy unconditionally, so a page that was later executed and
+              verified live kept showing "Approved -- ready for execution"
+              forever (the exact contradiction the audit found: a completed
+              page's REAL current status was COMPLETED, but this badge never
+              looked past approval_status to check). pageState here already
+              folds in deriveCompletionOverride the same way SchemaWizard's
+              own pageStates map does, so deriveCurrentSchemaStatus sees the
+              real current lifecycle truth, not just this one field. */}
+          {(() => {
+            const pageState = deriveCompletionOverride(opportunity) || deriveStateFromAnalysis(analysis)
+            const currentStatus = deriveCurrentSchemaStatus({ pageState, opportunity })
+            return (
+              <div style={{ margin: '4px 0 10px' }}>
+                <span className={`issue-badge ${currentStatus.tone}`}>{currentStatus.label}</span>
+              </div>
+            )
+          })()}
 
           {opportunity.approval_status === 'pending' && latest.status !== 'preparation_failed' && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1054,6 +1084,48 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   // actually sees.
   const queuedDossiers = useMemo(() => all.filter(d => queuedPaths.has(d.path)), [all, queuedPaths])
 
+  // activeQueuedDossiers / completedDossiers -- 2026-09-21 WORKFLOW
+  // CORRECTION, item A: a page whose current durable lifecycle state is
+  // COMPLETED (verified live) must stop presenting as active Schema work,
+  // without ever mutating/deleting queuedPaths itself -- this is a pure
+  // presentation split of the SAME queuedDossiers array above, not a second
+  // source of truth. See lib/schemaPageLifecycle.js#splitQueuedDossiers.
+  const { activeQueuedDossiers, completedDossiers } = useMemo(
+    () => splitQueuedDossiers(queuedDossiers, pageStates),
+    [queuedDossiers, pageStates]
+  )
+
+  // nonHomeQueuedItems / schemaWorkStages -- 2026-09-21 WORKFLOW
+  // CORRECTION, items D/E/F/G: Steps 4 (Generate & Review), 5 (Publish) and
+  // 6 (Verify) used to all render the SAME PreparedWorkPanel body for
+  // whichever single page happened to be "open" (activeWorkItem), so an AM
+  // on Step 6 for a page that hadn't even been prepared yet saw "hasn't
+  // been analyzed yet" instead of an honest verification-specific empty
+  // state -- and a page that had nothing left to do at all just kept
+  // showing the same generic panel on every step. classifyWorkItems is the
+  // single place that decides which of those three steps (or "completed",
+  // or none) a queued page's OWN opportunity currently belongs to, built
+  // from the exact same pageStates/preparedWorkByPath this file already
+  // treats as the real lifecycle -- no new persisted model, purely a
+  // projection recomputed on every render.
+  const nonHomeQueuedItems = useMemo(() => (
+    queuedDossiers
+      .filter(d => !(homepageEntry && d.path === homepageEntry.path))
+      .map(d => ({
+        path: d.path,
+        dossier: d,
+        analysis: pageAnalyses.get(d.path) || null,
+        pageState: getPageState(pageStates, d.path),
+        opportunity: preparedWorkByPath.get(d.path)?.opportunity || null
+      }))
+  ), [queuedDossiers, homepageEntry, pageAnalyses, pageStates, preparedWorkByPath])
+
+  const schemaWorkStages = useMemo(() => classifyWorkItems(nonHomeQueuedItems), [nonHomeQueuedItems])
+  const reviewWorkItems = schemaWorkStages.review
+  const publishWorkItems = schemaWorkStages.publish
+  const verificationWorkItems = schemaWorkStages.verify
+  const completedWorkItems = schemaWorkStages.completed
+
   // Best-effort, read-only load of any Schema prepared work that already
   // exists for a page -- calls the prepare-work route's GET branch ONLY
   // (never POST: this never fetches the client's live site, never
@@ -1241,8 +1313,22 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   // means), and never the homepage (which is analyzed via the existing
   // audit pipeline, not this page-by-page flow -- see PageRow's own
   // "Already analyzed" handling for the same rule).
+  //
+  // WORKFLOW CORRECTION (2026-09-21, item B) -- this used to stop there, so
+  // a COMPLETED/verified page (still sitting in queuedPaths, by design --
+  // see splitQueuedDossiers below) remained checkbox-selectable, and so
+  // eligible for Select All Eligible / Analyze Selected / Prepare Selected.
+  // isBatchEligibleState is the ONE shared eligibility rule now -- every
+  // batch surface below (the checkbox's own disabled state,
+  // selectAllEligible, analyzeSelected, prepareSelected) calls THIS
+  // function rather than re-checking state itself, so there is exactly one
+  // place a page becomes batch-ineligible once it's done. Re-analyze Page
+  // is a deliberately SEPARATE, always-available action (see its own
+  // button below) -- never gated by this.
   function isSelectablePath(path) {
-    return queuedPaths.has(path) && !(homepageEntry && path === homepageEntry.path)
+    return queuedPaths.has(path)
+      && !(homepageEntry && path === homepageEntry.path)
+      && isBatchEligibleState(getPageState(pageStates, path))
   }
 
   function toggleSelected(path) {
@@ -1614,6 +1700,36 @@ export default function SchemaWizard({ pillar, clientId, client }) {
     })
   }
 
+  // preparedWorkPanelProps(path) -- 2026-09-21 WORKFLOW CORRECTION: Steps
+  // 4/5/6 now each render PreparedWorkPanel/WordPressExecutionPanel for
+  // potentially SEVERAL queued pages at once (reviewWorkItems/
+  // publishWorkItems/verificationWorkItems), where before there was only
+  // ever one (activeWorkItem.path). Rather than repeat this same 14-prop
+  // wiring a third and fourth time, this builds it once per path -- every
+  // field here is identical to what Step 2's and Step 3's existing
+  // PreparedWorkPanel calls already construct inline.
+  function preparedWorkPanelProps(path) {
+    return {
+      prepared: preparedWorkByPath.get(path),
+      isPreparing: preparingPaths.has(path),
+      isBusy: lifecycleBusyPaths.has(path),
+      error: preparedWorkErrors.get(path),
+      editingDraft: editingDrafts.get(path),
+      onPrepare: () => prepareSchemaWorkNow(path),
+      onApprove: (latest) => approvePreparedWork(path, preparedWorkByPath.get(path)?.opportunity?.id, latest),
+      onStartEdit: (payload) => startEditingPreparedWork(path, payload),
+      onCancelEdit: () => cancelEditingPreparedWork(path),
+      onDraftChange: (text) => setEditingDrafts(prev => new Map(prev).set(path, text)),
+      onSaveEdit: (latest) => saveEditedPreparedWork(path, preparedWorkByPath.get(path)?.opportunity?.id, latest),
+      onReject: () => rejectPreparedWork(path, preparedWorkByPath.get(path)?.opportunity?.id),
+      onDeploy: () => deploySchemaWork(path, preparedWorkByPath.get(path)?.opportunity?.id),
+      onVerify: () => verifySchemaWork(path, preparedWorkByPath.get(path)?.opportunity?.id),
+      isExecuting: executingPaths.has(path),
+      isVerifying: verifyingPaths.has(path),
+      executionError: executionErrors.get(path)
+    }
+  }
+
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
       <StepChips labels={STEP_LABELS} step={step} onStep={setStep} />
@@ -1747,16 +1863,27 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                   </div>
                 </div>
 
-                {queuedDossiers.length > 0 && (() => {
-                  const selectableCount = queuedDossiers.filter(d => isSelectablePath(d.path)).length
+                {/* WORKFLOW CORRECTION (2026-09-21, item A) -- the Schema
+                    work queue used to be one flat list of every queuedPaths
+                    entry, so a page that was already verified live sat
+                    forever alongside genuinely unfinished work, still
+                    batch-selectable (see isSelectablePath's own correction
+                    above). activeQueuedDossiers/completedDossiers are a
+                    pure presentation split of the exact same queuedDossiers
+                    array -- queuedPaths itself is never touched, so nothing
+                    here is destructive; a completed page's durable record
+                    stays exactly where it was, it just renders in a
+                    different, clearly-labeled section below. */}
+                {activeQueuedDossiers.length > 0 && (() => {
+                  const selectableCount = activeQueuedDossiers.filter(d => isSelectablePath(d.path)).length
                   const selectedSelectableCount = Array.from(selectedPaths).filter(isSelectablePath).length
                   const analyzeTargetCount = Array.from(selectedPaths).filter(p => isSelectablePath(p) && !analyzingPaths.has(p)).length
                   const prepareTargetCount = Array.from(selectedPaths).filter(p => isSelectablePath(p) && isEligibleForPrepare(p) && !preparingPaths.has(p)).length
                   return (
                     <div className="card" style={{ padding: 18, marginBottom: 14 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Schema work queue ({queuedDossiers.length})</div>
+                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Schema work queue ({activeQueuedDossiers.length})</div>
                       <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
-                        Pages an AM has intentionally chosen for schema work -- separate from Recommended (the system&rsquo;s suggestion) and from Open (whichever page is currently shown below). Queuing a page doesn&rsquo;t analyze it by itself; click Analyze page to actually fetch it and run its real checks.
+                        Pages an AM has intentionally chosen for schema work -- separate from Recommended (the system&rsquo;s suggestion) and from Open (whichever page is currently shown below). Queuing a page doesn&rsquo;t analyze it by itself; click Analyze page to actually fetch it and run its real checks. Completed/verified pages have moved to Completed Schema Work below.
                       </p>
                       {/* PHASE 6 (2026-09-04) -- BATCH ANALYSIS / SELECTION MODEL: the
                           checkboxes below select pages for the two bulk actions here.
@@ -1799,7 +1926,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                         </p>
                       )}
                       <div style={{ display: 'grid', gap: 6 }}>
-                        {queuedDossiers.map(dossier => {
+                        {activeQueuedDossiers.map(dossier => {
                           const state = getPageState(pageStates, dossier.path)
                           const isAnalyzing = analyzingPaths.has(dossier.path)
                           const reqError = analysisRequestErrors.get(dossier.path)
@@ -1809,7 +1936,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                           const isExpanded = expandedAnalysisPaths.has(dossier.path)
                           const selectable = isSelectablePath(dossier.path)
                           const prepared = preparedWorkByPath.get(dossier.path)
-                          const approval = prepared?.opportunity?.approval_status
+                          const currentStatus = deriveCurrentSchemaStatus({ pageState: state, opportunity: prepared?.opportunity })
                           return (
                             <div key={dossier.path} className="card" style={{ padding: 10 }}>
                               <div className="page-row" style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr auto auto auto', alignItems: 'center', gap: 10 }}>
@@ -1825,8 +1952,18 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                                 <span className="path" onClick={() => setOpenPath(dossier.path)} style={{ cursor: 'pointer', textDecoration: dossier.path === effectiveOpenPath ? 'underline' : 'none' }}>
                                   {dossier.path}
                                 </span>
-                                <span className={`status ${isAnalyzing ? 'caution' : PAGE_STATE_TONE[state] || 'muted'}`}>
-                                  {isAnalyzing ? 'Analyzing…' : (reqError || PAGE_STATE_LABELS[state] || 'Not analyzed yet')}
+                                {/* CURRENT STATUS PRECEDENCE (2026-09-21
+                                    WORKFLOW CORRECTION, item C) -- this used
+                                    to show PAGE_STATE_LABELS[state] here AND
+                                    a second, separate approval-status badge
+                                    below (APPROVAL_STATUS_COPY), which could
+                                    disagree with each other (a verified page
+                                    still showing "Approved -- ready for
+                                    execution"). deriveCurrentSchemaStatus is
+                                    now the one ranked answer both used to
+                                    give independently. */}
+                                <span className={`status ${isAnalyzing ? 'caution' : CURRENT_STATUS_PILL_TONE[currentStatus.code] || 'muted'}`}>
+                                  {isAnalyzing ? 'Analyzing…' : (reqError || currentStatus.label)}
                                 </span>
                                 {analysis && (
                                   <button className="btn btn-secondary" onClick={() => toggleAnalysisExpanded(dossier.path)}>
@@ -1837,19 +1974,6 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                                   {dossier.type === 'Home' ? 'Already analyzed' : (state === 'UNANALYZED' ? 'Analyze page' : 'Re-analyze page')}
                                 </button>
                               </div>
-                              {/* STATUS MODEL (Section 8) -- the approval/prepared-work
-                                  status is a SEPARATE fact from the diagnosis status above
-                                  (ACTIONABLE_GAP/NO_ACTION_NEEDED/etc.), shown as its own
-                                  badge rather than folded into or overwriting it, so an AM
-                                  can tell "what did the diagnosis find" apart from "what's
-                                  happened to the prepared fix for it" at a glance. */}
-                              {approval && APPROVAL_STATUS_COPY[approval] && (
-                                <div style={{ margin: '6px 0 0 24px' }}>
-                                  <span className={`issue-badge ${APPROVAL_STATUS_COPY[approval].tone}`}>
-                                    {APPROVAL_STATUS_COPY[approval].label}
-                                  </span>
-                                </div>
-                              )}
                               {queueError && <p className="text-small issue-why" style={{ margin: '6px 0 0' }}>Could not save this queue change: {queueError}</p>}
                               {persistWarning && <p className="text-small issue-why" style={{ margin: '6px 0 0' }}>{persistWarning}</p>}
                               {isExpanded && analysis && (
@@ -1894,6 +2018,68 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                     </div>
                   )
                 })()}
+
+                {/* COMPLETED SCHEMA WORK (2026-09-21 WORKFLOW CORRECTION,
+                    item A) -- historical/finished work, not active queue
+                    work: no checkbox, no batch selection, no Analyze/
+                    Prepare buttons -- only View analysis/history (the same
+                    PageAnalysisResult + PreparedWorkPanel the active queue
+                    uses, reused read-only in effect since a completed
+                    opportunity's approval_status is never 'pending' so
+                    Approve/Edit/Reject never render for it) and an explicit
+                    Re-analyze Page action (item B: this is the ONLY way a
+                    completed page re-enters active work, and it does NOT
+                    auto-reactivate it -- deriveCompletionOverride keeps
+                    winning until the opportunity itself is re-executed and
+                    re-verified, exactly per spec). */}
+                {completedDossiers.length > 0 && (
+                  <div className="card" style={{ padding: 18, marginBottom: 14 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Completed Schema work ({completedDossiers.length})</div>
+                    <p className="text-tiny text-muted" style={{ margin: '0 0 10px' }}>
+                      Verified, historical Schema work -- not part of the active queue above, and not eligible for batch selection.
+                    </p>
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      {completedDossiers.map(dossier => {
+                        const state = getPageState(pageStates, dossier.path)
+                        const isAnalyzing = analyzingPaths.has(dossier.path)
+                        const analysis = pageAnalyses.get(dossier.path)
+                        const isExpanded = expandedAnalysisPaths.has(dossier.path)
+                        const prepared = preparedWorkByPath.get(dossier.path)
+                        const currentStatus = deriveCurrentSchemaStatus({ pageState: state, opportunity: prepared?.opportunity })
+                        return (
+                          <div key={dossier.path} className="card" style={{ padding: 10 }}>
+                            <div className="page-row" style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr auto auto', alignItems: 'center', gap: 10 }}>
+                              <span aria-hidden="true">&#10003;</span>
+                              <span className="type-badge" style={{ cursor: 'default' }}>{dossier.type}</span>
+                              <span className="path" onClick={() => setOpenPath(dossier.path)} style={{ cursor: 'pointer', textDecoration: dossier.path === effectiveOpenPath ? 'underline' : 'none' }}>
+                                {dossier.path}
+                              </span>
+                              <span className={`status ${CURRENT_STATUS_PILL_TONE[currentStatus.code] || 'good'}`}>
+                                {currentStatus.label}
+                              </span>
+                              {analysis && (
+                                <button className="btn btn-secondary" onClick={() => toggleAnalysisExpanded(dossier.path)}>
+                                  {isExpanded ? 'Hide analysis' : 'View analysis'}
+                                </button>
+                              )}
+                            </div>
+                            <div style={{ margin: '6px 0 0 24px' }}>
+                              <button className="btn btn-secondary" disabled={isAnalyzing} onClick={() => analyzePageNow(dossier.path)}>
+                                {isAnalyzing ? 'Analyzing…' : 'Re-analyze page'}
+                              </button>
+                            </div>
+                            {isExpanded && analysis && (
+                              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                                <PageAnalysisResult analysis={analysis} />
+                                <PreparedWorkPanel path={dossier.path} analysis={analysis} {...preparedWorkPanelProps(dossier.path)} />
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* PRODUCT DECISION #1 (2026-09-02 correction pass): "All
                     discovered pages" is REMOVED from the normal workflow --
@@ -2115,41 +2301,37 @@ export default function SchemaWizard({ pillar, clientId, client }) {
         </div>
       )}
 
-      {/* Steps 4-6 -- Generate & Review / Publish / Verify. 2026-09-04d
-          WORKFLOW CORRECTION: this used to render <SchemaGenerator>
-          (the homepage/sitewide LocalBusiness tool) UNCONDITIONALLY,
-          regardless of which page was actually open -- it never consulted
-          effectiveOpenPath/isHomeOpen at all, so an AM working /about/'s or
-          /contact/'s Schema gap who reached these steps (via the "Generate
-          & Review" step chip, or Step 3's old "Fix with the generator"
-          affordance staying set from a prior homepage visit) saw the
-          unrelated homepage form -- even after the homepage's own schema
-          was already generated, published and verified. See
-          lib/schemaPageSelection.js#resolveActiveWorkItem's header for the
-          full root-cause writeup.
-          Now these steps dispatch on activeWorkItem -- the SAME
-          effectiveOpenPath/homepage-path comparison Steps 1-3 already use
-          -- so Generate & Review, Publish and Verify are structurally
-          guaranteed to act on one, single, current work item:
-            - 'home'  -> the existing homepage/sitewide generator, UNCHANGED
-              (PRODUCT DECISION: it may remain the homepage's own tool; see
-              item 2/10 of the workflow correction -- it is not migrated
-              onto the opportunities/schema_page_work lifecycle here, since
-              it never participated in that lifecycle to begin with. That
-              remains the one identified architectural gap; see this
-              session's final report).
-            - 'page'  -> this page's OWN diagnosis + the exact same
-              PreparedWorkPanel (Prepare/Review/Approve/Edit/Reject, then
-              Deploy/Verify via WordPressExecutionPanel) Step 3 already
-              renders inline for a non-home page -- reused as-is, never a
-              second generator/review architecture. Deploy and Verify here
-              act on this exact opportunity/approved prepared-work, the
-              same one Step 3's inline panel and the execute-work/
-              verify-work routes already resolve by fingerprint (see the
-              2026-09-04c hotfix) -- there is no separate "which page is
-              step 5 about" state that could ever drift from step 4's.
-            - null    -> no page is open yet (e.g. zero candidate pages) --
-              an honest empty state, never a guess at what to show. */}
+      {/* Steps 4-6 -- Generate & Review / Publish / Verify.
+          2026-09-21 WORKFLOW CORRECTION (supersedes the 2026-09-04d pass
+          below): the 04d fix made these steps act on the CORRECT single
+          page instead of always the homepage -- but they still rendered
+          the exact same PreparedWorkPanel body on every one of Steps 4/5/6
+          for that one page, and only ever considered whichever page
+          happened to be "open." A page that was already verified live kept
+          showing "hasn't been analyzed yet" on Step 6 if a different page
+          was open; Step 4 showed a full Prepare/Approve panel even once
+          there was nothing left to review. That was the audit's core
+          finding (item G): ONE generic active item was standing in for
+          three structurally different questions (What needs review? /
+          What's ready to publish? / What's awaiting verification?).
+          Non-home Steps 4/5/6 now each render their OWN stage-specific
+          collection (reviewWorkItems/publishWorkItems/
+          verificationWorkItems/completedWorkItems, all pure projections of
+          the same durable lifecycle -- see classifyWorkItems above) instead
+          of a single page's activeWorkItem, so all queued work at that
+          stage is visible, not just whichever page happens to be open, and
+          a page that has nothing left to do at a given stage simply isn't
+          listed there.
+            - 'home' stays exactly as the 04d fix left it: the existing
+              homepage/sitewide generator, UNCHANGED (see that pass's own
+              comment below for why it isn't migrated onto this lifecycle
+              here).
+            - every non-home case (page open, no page open, or the open
+              page has no active work at this stage) now renders the same
+              stage-specific list -- there is no longer a separate "no page
+              open" empty state for these three steps; an honest
+              stage-specific empty state (item D/E/F's exact copy) covers
+              it instead. */}
       {(step === 4 || step === 5 || step === 6) && (
         <div>
           <WorkQueueSummary
@@ -2165,50 +2347,142 @@ export default function SchemaWizard({ pillar, clientId, client }) {
               bare
               visibleSection={step === 4 ? 'form' : step === 5 ? 'publish' : 'verify'}
             />
-          ) : activeWorkItem.type === 'page' ? (() => {
-            const analysis = pageAnalyses.get(activeWorkItem.path)
-            if (!analysis) {
-              return (
-                <div className="card-empty" style={{ padding: 18 }}>
-                  <div className="text-small text-muted">This page hasn&rsquo;t been analyzed yet -- go back and click Analyze page.</div>
-                </div>
-              )
-            }
-            return (
-              <div className="card" style={{ padding: 18 }}>
-                <div className="grade-title" style={{ marginBottom: 2 }}>
-                  {activeWorkItem.path} &mdash; {analysis.classification?.type || 'Page'}
-                </div>
-                <div className="grade-sub" style={{ marginBottom: 14 }}>
-                  Generate &amp; Review, Publish and Verify all act on this exact page -- never the homepage/sitewide generator.
-                </div>
-                <PageAnalysisResult analysis={analysis} />
-                <PreparedWorkPanel
-                  path={activeWorkItem.path}
-                  analysis={analysis}
-                  prepared={preparedWorkByPath.get(activeWorkItem.path)}
-                  isPreparing={preparingPaths.has(activeWorkItem.path)}
-                  isBusy={lifecycleBusyPaths.has(activeWorkItem.path)}
-                  error={preparedWorkErrors.get(activeWorkItem.path)}
-                  editingDraft={editingDrafts.get(activeWorkItem.path)}
-                  onPrepare={() => prepareSchemaWorkNow(activeWorkItem.path)}
-                  onApprove={(latest) => approvePreparedWork(activeWorkItem.path, preparedWorkByPath.get(activeWorkItem.path)?.opportunity?.id, latest)}
-                  onStartEdit={(payload) => startEditingPreparedWork(activeWorkItem.path, payload)}
-                  onCancelEdit={() => cancelEditingPreparedWork(activeWorkItem.path)}
-                  onDraftChange={(text) => setEditingDrafts(prev => new Map(prev).set(activeWorkItem.path, text))}
-                  onSaveEdit={(latest) => saveEditedPreparedWork(activeWorkItem.path, preparedWorkByPath.get(activeWorkItem.path)?.opportunity?.id, latest)}
-                  onReject={() => rejectPreparedWork(activeWorkItem.path, preparedWorkByPath.get(activeWorkItem.path)?.opportunity?.id)}
-                  onDeploy={() => deploySchemaWork(activeWorkItem.path, preparedWorkByPath.get(activeWorkItem.path)?.opportunity?.id)}
-                  onVerify={() => verifySchemaWork(activeWorkItem.path, preparedWorkByPath.get(activeWorkItem.path)?.opportunity?.id)}
-                  isExecuting={executingPaths.has(activeWorkItem.path)}
-                  isVerifying={verifyingPaths.has(activeWorkItem.path)}
-                  executionError={executionErrors.get(activeWorkItem.path)}
-                />
+          ) : step === 4 ? (
+            // GENERATE & REVIEW -- item D. Purpose: what exactly are we
+            // going to change? Reuses PreparedWorkPanel UNCHANGED, once per
+            // review-stage page -- this is where it belongs; it is never
+            // rebuilt here.
+            reviewWorkItems.length === 0 ? (
+              <div className="card-empty" style={{ padding: 18 }}>
+                <div className="text-small text-muted">No analyzed Schema work is currently waiting for Generate &amp; Review.</div>
+                {recommended.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <div className="text-tiny text-muted" style={{ marginBottom: 8 }}>
+                      Next recommended page: {recommended[0].path} &mdash; {recommended[0].type} &mdash; Not analyzed
+                    </div>
+                    <button className="btn btn-secondary" onClick={() => setStep(2)}>Go to Page coverage</button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gap: 14 }}>
+                {reviewWorkItems.map(item => (
+                  <div key={item.path} className="card" style={{ padding: 18 }}>
+                    <div className="grade-title" style={{ marginBottom: 2 }}>
+                      {item.path} &mdash; {item.analysis?.classification?.type || item.dossier?.type || 'Page'}
+                    </div>
+                    <PageAnalysisResult analysis={item.analysis} />
+                    <PreparedWorkPanel path={item.path} analysis={item.analysis} {...preparedWorkPanelProps(item.path)} />
+                  </div>
+                ))}
               </div>
             )
-          })() : (
-            <div className="card-empty" style={{ padding: 18 }}>
-              <div className="text-small text-muted">Pick a page in Step 2 first.</div>
+          ) : step === 5 ? (
+            // PUBLISH -- item E. Purpose: what approved work is ready to go
+            // live? Uses WordPressExecutionPanel/the existing execute-work
+            // plumbing directly -- never the full PreparedWorkPanel body
+            // (no Prepare/Approve/Reject controls belong here; approval
+            // already happened in Generate & Review).
+            <div>
+              {publishWorkItems.length === 0 ? (
+                <div className="card-empty" style={{ padding: 18 }}>
+                  <div className="text-small text-muted">No approved Schema work is ready to publish.</div>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: 14 }}>
+                  {publishWorkItems.map(item => {
+                    const panelProps = preparedWorkPanelProps(item.path)
+                    const latest = (panelProps.prepared?.preparedWork || [])[0] || null
+                    const isYellow = item.opportunity?.execution_capability === 'yellow'
+                    return (
+                      <div key={item.path} className="card" style={{ padding: 18 }}>
+                        <div className="grade-title" style={{ marginBottom: 2 }}>{item.path} &mdash; {item.dossier?.type || 'Page'}</div>
+                        <div className="grade-sub" style={{ marginBottom: 10 }}>
+                          Approved{latest ? ` · Version ${latest.version}` : ''} · {isYellow ? 'Ready for WordPress' : 'Approved for manual/RED execution -- publish outside this tool'}
+                        </div>
+                        {isYellow && (
+                          <WordPressExecutionPanel
+                            opportunity={item.opportunity}
+                            isExecuting={panelProps.isExecuting}
+                            isVerifying={panelProps.isVerifying}
+                            error={panelProps.executionError}
+                            onDeploy={panelProps.onDeploy}
+                            onVerify={panelProps.onVerify}
+                          />
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {/* WAITING FOR APPROVAL -- item E's optional secondary
+                  section: prepared work that isn't approved yet may still
+                  be visible for context, but deliberately renders no Deploy
+                  control (reviewWorkItems already covers these pages for
+                  actual review/approval -- this is read-only). */}
+              {reviewWorkItems.some(item => item.opportunity) && (
+                <div className="card" style={{ padding: 18, marginTop: 14 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Waiting for approval</div>
+                  <div style={{ display: 'grid', gap: 4 }}>
+                    {reviewWorkItems.filter(item => item.opportunity).map(item => (
+                      <div key={item.path} className="text-small" style={{ display: 'flex', gap: 8 }}>
+                        <span>{item.path}</span>
+                        <span className="text-muted">&mdash; Pending AM review</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            // VERIFY -- item F. Purpose: did the deployed work actually go
+            // live? Uses the existing Verify Live functionality
+            // (WordPressExecutionPanel) directly -- no Prepare/Approve/
+            // Publish controls here.
+            <div>
+              {verificationWorkItems.length === 0 ? (
+                <div className="card-empty" style={{ padding: 18 }}>
+                  <div className="text-small text-muted">No deployed Schema work is awaiting verification.</div>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: 14 }}>
+                  {verificationWorkItems.map(item => {
+                    const panelProps = preparedWorkPanelProps(item.path)
+                    const isYellow = item.opportunity?.execution_capability === 'yellow'
+                    return (
+                      <div key={item.path} className="card" style={{ padding: 18 }}>
+                        <div className="grade-title" style={{ marginBottom: 10 }}>{item.path} &mdash; {item.dossier?.type || 'Page'}</div>
+                        {isYellow ? (
+                          <WordPressExecutionPanel
+                            opportunity={item.opportunity}
+                            isExecuting={panelProps.isExecuting}
+                            isVerifying={panelProps.isVerifying}
+                            error={panelProps.executionError}
+                            onDeploy={panelProps.onDeploy}
+                            onVerify={panelProps.onVerify}
+                          />
+                        ) : (
+                          <p className="text-small text-muted">Deployed via manual/RED execution -- verify outside this automated flow.</p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {completedWorkItems.length > 0 && (
+                <div className="card" style={{ padding: 18, marginTop: 14 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Verified history</div>
+                  <div style={{ display: 'grid', gap: 4 }}>
+                    {completedWorkItems.map(item => (
+                      <div key={item.path} className="text-small" style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                        <span aria-hidden="true">&#10003;</span>
+                        <span>{item.path}</span>
+                        <span className="text-muted">&mdash; Verified live</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
           <div className="cta-row">
