@@ -9,6 +9,9 @@ import {
   deriveHomepageState, deriveStateFromAnalysis, deriveCompletionOverride, excludedPathsFromStates, getPageState,
   splitQueuedDossiers, isBatchEligibleState, deriveCurrentSchemaStatus, classifyWorkItems
 } from '../../../lib/schemaPageLifecycle'
+import {
+  summarizeDiagnosisForApproval, checkSeverityTone, buildChangePresentation, parseUnresolvedDependency
+} from '../../../lib/schemaPreparedWorkPresentation'
 import { mergeDurableQueuedPaths, mergeDurableAnalyses } from '../../../lib/schemaPageHydration'
 import { runWithBoundedConcurrency } from '../../../lib/schemaBatchAnalysis'
 
@@ -389,7 +392,16 @@ function CheckList({ checks }) {
     <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
       {checks.map(c => (
         <div className="issue-item" key={c.id}>
-          <span className={`issue-badge ${c.status === 'pass' ? 'issue-passing' : 'issue-critical'}`}>
+          {/* CORE VS RECOMMENDED VISUAL SEMANTICS (2026-09-23 UI audit,
+              section 5) -- a failing Recommended check used to render with
+              the identical red issue-critical badge as a failing Core
+              check, so an AM saw a wall of "Fail" badges that all looked
+              equally alarming even though only a Core failure is actually
+              ACTION_REQUIRED. checkSeverityTone reflects that existing
+              distinction (already real in computeFinalStatus) visually --
+              it does not change which checks pass/fail or what tier they
+              belong to. */}
+          <span className={`issue-badge ${checkSeverityTone(c)}`}>
             {c.status === 'pass' ? 'Pass' : 'Fail'}
           </span>
           <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4 }}>{c.label}</div>
@@ -502,14 +514,57 @@ function isEligibleForPreparedWorkDisplay(analysis) {
   return false
 }
 
-function SchemaChangeList({ title, items, tone }) {
+// SchemaChangeList -- shared ADD/MODIFY/REMOVE renderer (2026-09-23 UI
+// audit, section 7: generalized, not Service-specific). Default behavior
+// (`detailed` unset/false) is UNCHANGED from before this pass -- one prose
+// line per item -- used as-is by Step 2's/Step 3's existing PreparedWorkPanel
+// call sites, zero risk to already-validated flows. `detailed` (opted into
+// only by PreparedWorkPanel's `layout="review"` -- see below) instead
+// renders each item's real, per-property evidence via
+// lib/schemaPreparedWorkPresentation.js#buildChangePresentation -- the SAME
+// primitive for an ADD, MODIFY, or (once anything produces one) REMOVE
+// item, and for a brand-new evidence-backed item or an older item with no
+// `.evidence` at all (About/Contact) alike; an item with no presentable
+// properties at all still falls back to its own prose description, never a
+// blank row.
+function SchemaChangeList({ title, items, kind, detailed, canonicalEntity }) {
   if (!items || items.length === 0) return null
+  if (!detailed) {
+    return (
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 4 }}>{title}</div>
+        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+          {items.map((item, i) => <li key={i} style={{ marginBottom: 4 }}>{typeof item === 'string' ? item : item.description}</li>)}
+        </ul>
+      </div>
+    )
+  }
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 4 }}>{title}</div>
-      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
-        {items.map((item, i) => <li key={i} style={{ marginBottom: 4 }}>{typeof item === 'string' ? item : item.description}</li>)}
-      </ul>
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 6 }}>{title}</div>
+      {items.map((item, i) => {
+        const presentation = buildChangePresentation(item, kind, canonicalEntity)
+        if (!presentation) return null
+        return (
+          <div key={i} className="card" style={{ padding: 12, marginBottom: 8 }}>
+            {presentation.nodeType && <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{presentation.nodeType}</div>}
+            {presentation.properties.length > 0 ? (
+              <div style={{ display: 'grid', gap: 8 }}>
+                {presentation.properties.map(p => (
+                  <div key={p.key}>
+                    <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)' }}>{p.label}</div>
+                    <div style={{ fontSize: 13, wordBreak: 'break-word' }}>{p.value}</div>
+                    {p.supportingDetail && <div className="text-tiny text-muted" style={{ wordBreak: 'break-all' }}>{p.supportingDetail}</div>}
+                    {p.sourceLabel && <div className="text-tiny text-muted">Source: {p.sourceLabel}</div>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-small" style={{ margin: 0 }}>{presentation.fallbackDescription}</p>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -593,137 +648,318 @@ function WordPressExecutionPanel({ opportunity, isExecuting, isVerifying, error,
   )
 }
 
+// PreparedWorkPanel -- `layout` ('default' | 'review', 2026-09-23 Step 4 AM
+// Review UI correction): 'default' (unset) renders EXACTLY the same
+// markup/order this component has always rendered -- Step 2's and Step 3's
+// existing call sites pass nothing and are byte-for-byte unaffected by this
+// pass. 'review' (Step 4's reviewWorkItems only) reorders the SAME
+// underlying data -- nothing about eligibility, approval, execution, or the
+// prepared-work payload itself changes -- into the sequence the UI audit
+// asked for: status -> why we're recommending this -> what we'd add/modify
+// -> what we're deliberately leaving out -> what stays untouched ->
+// approval decision -> collapsed diagnosis -> collapsed raw JSON-LD. The
+// approval/reject/edit handlers, WordPressExecutionPanel, and every
+// lifecycle gate below are IDENTICAL in both layouts.
 function PreparedWorkPanel({
   path, analysis, prepared, isPreparing, isBusy, error, editingDraft,
   onPrepare, onApprove, onStartEdit, onCancelEdit, onDraftChange, onSaveEdit, onReject,
-  onDeploy, onVerify, isExecuting, isVerifying, executionError
+  onDeploy, onVerify, isExecuting, isVerifying, executionError, layout = 'default'
 }) {
   const eligible = isEligibleForPreparedWorkDisplay(analysis)
   const opportunity = prepared?.opportunity
   const versions = prepared?.preparedWork || []
   const latest = versions[0] || null
+  // Local, per-instance UI state -- purely presentational disclosure
+  // toggles, never persisted, never affecting any lifecycle/approval state.
+  // Safe as component-local state (not lifted to SchemaWizard's own state
+  // maps like editingDrafts/expandedAnalysisPaths) because each
+  // PreparedWorkPanel instance in a list is keyed by its own path, so React
+  // already keeps these independent per page.
+  const [showDiagnosis, setShowDiagnosis] = useState(false)
+  const [showRawJson, setShowRawJson] = useState(false)
 
   if (!eligible && !opportunity) return null
 
-  return (
-    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Schema prepared work</div>
+  const reviewMode = layout === 'review'
+  const pageState = opportunity ? (deriveCompletionOverride(opportunity) || deriveStateFromAnalysis(analysis)) : deriveStateFromAnalysis(analysis)
+  const currentStatus = deriveCurrentSchemaStatus({ pageState, opportunity })
+  const diagnosisSummary = analysis && analysis.fetchState === 'success'
+    ? summarizeDiagnosisForApproval({ finalStatus: analysis.finalStatus, coreChecks: analysis.coreChecks, recommendedChecks: analysis.recommendedChecks })
+    : null
 
-      {error && <p className="text-small issue-why" style={{ marginBottom: 8 }}>{error}</p>}
-
-      {!opportunity && eligible && (
-        <>
-          <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
-            This page&rsquo;s diagnosed gap can be prepared as real, page-specific schema for AM review -- nothing is generated or changed until you click below.
-          </p>
-          <button className="btn btn-primary" disabled={isPreparing} onClick={onPrepare}>
-            {isPreparing ? 'Preparing…' : 'Prepare schema work'}
-          </button>
-        </>
-      )}
-
-      {opportunity && latest && (
-        <div>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
-            {opportunity.detail?.targetProfile && <>Target profile: {opportunity.detail.targetProfile} &middot; </>}
-            Version {latest.version}{latest.created_by === 'am' ? ' (AM-edited)' : ''}
-            {latest.status === 'preparation_failed' && ' -- preparation failed'}
-          </div>
-
-          {latest.status === 'preparation_failed' ? (
-            <p className="text-small issue-why">
-              {latest.payload?.reason || 'No content-defensible schema change could be generated for this page without fabricating evidence.'}
-            </p>
-          ) : (
-            <>
-              <SchemaChangeList title="Current schema (kept unchanged)" items={latest.payload?.keep} />
-              <SchemaChangeList title="Proposed: add" items={latest.payload?.add} />
-              <SchemaChangeList title="Proposed: modify" items={latest.payload?.modify} />
-
-              {latest.payload?.canonicalEntity && !latest.payload.canonicalEntity.resolved && (
-                <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
-                  Canonical Organization @id not resolved ({latest.payload.canonicalEntity.source}) -- entity references were omitted rather than fabricated.
-                </p>
-              )}
-              {Array.isArray(latest.payload?.unresolvedDependencies) && latest.payload.unresolvedDependencies.length > 0 && (
-                <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>Unresolved dependencies</div>
-                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--muted)' }}>
-                    {latest.payload.unresolvedDependencies.map((d, i) => <li key={i}>{d}</li>)}
-                  </ul>
-                </div>
-              )}
-
-              {editingDraft === undefined ? (
-                (latest.payload?.add?.length > 0 || latest.payload?.modify?.length > 0) && (
-                  <>
-                    <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 4 }}>Prepared JSON-LD</div>
-                    <pre style={{ background: 'var(--bg-alt)', padding: 10, borderRadius: 'var(--radius-sm)', fontSize: 12, overflowX: 'auto', marginBottom: 10 }}>
-                      {JSON.stringify({ add: latest.payload.add, modify: latest.payload.modify }, null, 2)}
-                    </pre>
-                  </>
-                )
-              ) : (
-                <>
-                  <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 4 }}>Edit prepared JSON-LD (add / modify)</div>
-                  <textarea
-                    value={editingDraft}
-                    onChange={(e) => onDraftChange(e.target.value)}
-                    rows={12}
-                    style={{ width: '100%', fontFamily: 'monospace', fontSize: 12, marginBottom: 8 }}
-                  />
-                </>
-              )}
-            </>
-          )}
-
-          {/* CURRENT STATUS PRECEDENCE (2026-09-21 WORKFLOW CORRECTION, item
-              C) -- this used to render opportunity.approval_status's own
-              copy unconditionally, so a page that was later executed and
-              verified live kept showing "Approved -- ready for execution"
-              forever (the exact contradiction the audit found: a completed
-              page's REAL current status was COMPLETED, but this badge never
-              looked past approval_status to check). pageState here already
-              folds in deriveCompletionOverride the same way SchemaWizard's
-              own pageStates map does, so deriveCurrentSchemaStatus sees the
-              real current lifecycle truth, not just this one field. */}
-          {(() => {
-            const pageState = deriveCompletionOverride(opportunity) || deriveStateFromAnalysis(analysis)
-            const currentStatus = deriveCurrentSchemaStatus({ pageState, opportunity })
-            return (
-              <div style={{ margin: '4px 0 10px' }}>
-                <span className={`issue-badge ${currentStatus.tone}`}>{currentStatus.label}</span>
-              </div>
-            )
-          })()}
-
-          {opportunity.approval_status === 'pending' && latest.status !== 'preparation_failed' && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {editingDraft === undefined ? (
-                <>
-                  <button className="btn btn-primary" disabled={isBusy} onClick={() => onApprove(latest)}>Approve</button>
-                  <button className="btn btn-secondary" disabled={isBusy} onClick={() => onStartEdit(latest.payload)}>Edit before approving</button>
-                  <button className="btn btn-secondary" disabled={isBusy} onClick={onReject}>Reject</button>
-                </>
-              ) : (
-                <>
-                  <button className="btn btn-primary" disabled={isBusy} onClick={() => onSaveEdit(latest)}>Save edited version</button>
-                  <button className="btn btn-secondary" disabled={isBusy} onClick={onCancelEdit}>Cancel edit</button>
-                </>
-              )}
-            </div>
-          )}
-
-          <WordPressExecutionPanel
-            opportunity={opportunity}
-            isExecuting={isExecuting}
-            isVerifying={isVerifying}
-            error={executionError}
-            onDeploy={onDeploy}
-            onVerify={onVerify}
-          />
+  const diagnosisDisclosure = reviewMode && analysis ? (
+    <div style={{ marginTop: 12 }}>
+      <button className="btn btn-secondary" onClick={() => setShowDiagnosis(v => !v)}>
+        {showDiagnosis ? 'Hide diagnosis' : 'View diagnosis'}
+      </button>
+      {showDiagnosis && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed var(--border)' }}>
+          <PageAnalysisResult analysis={analysis} />
         </div>
       )}
+    </div>
+  ) : null
+
+  if (!opportunity && eligible) {
+    return (
+      <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Schema prepared work</div>
+        {error && <p className="text-small issue-why" style={{ marginBottom: 8 }}>{error}</p>}
+        {reviewMode && diagnosisSummary && (
+          <p className="text-small" style={{ margin: '0 0 8px' }}>
+            <strong>{diagnosisSummary.headline}.</strong> {diagnosisSummary.detail}
+          </p>
+        )}
+        <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
+          This page&rsquo;s diagnosed gap can be prepared as real, page-specific schema for AM review -- nothing is generated or changed until you click below.
+        </p>
+        <button className="btn btn-primary" disabled={isPreparing} onClick={onPrepare}>
+          {isPreparing ? 'Preparing…' : 'Prepare schema work'}
+        </button>
+        {diagnosisDisclosure}
+      </div>
+    )
+  }
+
+  if (!opportunity || !latest) return null
+
+  const versionLine = (
+    <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+      {opportunity.detail?.targetProfile && <>Target profile: {opportunity.detail.targetProfile} &middot; </>}
+      Version {latest.version}{latest.created_by === 'am' ? ' (AM-edited)' : ''}
+      {latest.status === 'preparation_failed' && ' -- preparation failed'}
+    </div>
+  )
+
+  const statusBadge = (
+    // CURRENT STATUS PRECEDENCE (2026-09-21 WORKFLOW CORRECTION, item C,
+    // carried forward unchanged) -- the one ranked, current-lifecycle-true
+    // status, never a stale approval_status-only badge.
+    <div style={{ margin: reviewMode ? '0 0 10px' : '4px 0 10px' }}>
+      <span className={`issue-badge ${currentStatus.tone}`}>{currentStatus.label}</span>
+    </div>
+  )
+
+  const approvalControls = opportunity.approval_status === 'pending' && latest.status !== 'preparation_failed' && (
+    <div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {editingDraft === undefined ? (
+          <>
+            <button className="btn btn-primary" disabled={isBusy} onClick={() => onApprove(latest)}>Approve</button>
+            <button className="btn btn-secondary" disabled={isBusy} onClick={() => onStartEdit(latest.payload)}>Edit before approving</button>
+            <button className="btn btn-secondary" disabled={isBusy} onClick={onReject}>Reject</button>
+          </>
+        ) : (
+          <>
+            <button className="btn btn-primary" disabled={isBusy} onClick={() => onSaveEdit(latest)}>Save edited version</button>
+            <button className="btn btn-secondary" disabled={isBusy} onClick={onCancelEdit}>Cancel edit</button>
+          </>
+        )}
+      </div>
+      {/* APPROVAL DECISION COPY (section 11) -- approval saves a decision;
+          it never itself publishes. Publishing is Step 5's own explicit
+          Deploy action (WordPressExecutionPanel below), gated on
+          approval_status === 'approved' -- unchanged. */}
+      {reviewMode && editingDraft === undefined && (
+        <p className="text-tiny text-muted" style={{ margin: '8px 0 0' }}>
+          Approving saves this decision. It does not publish anything -- publishing is a separate step.
+        </p>
+      )}
+    </div>
+  )
+
+  const rawJsonBlock = (latest.payload?.add?.length > 0 || latest.payload?.modify?.length > 0) && (
+    editingDraft === undefined ? (
+      <>
+        <pre style={{ background: 'var(--bg-alt)', padding: 10, borderRadius: 'var(--radius-sm)', fontSize: 12, overflowX: 'auto', marginBottom: 10 }}>
+          {JSON.stringify({ add: latest.payload.add, modify: latest.payload.modify }, null, 2)}
+        </pre>
+      </>
+    ) : (
+      <>
+        <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 4 }}>Edit prepared JSON-LD (add / modify)</div>
+        <textarea
+          value={editingDraft}
+          onChange={(e) => onDraftChange(e.target.value)}
+          rows={12}
+          style={{ width: '100%', fontFamily: 'monospace', fontSize: 12, marginBottom: 8 }}
+        />
+      </>
+    )
+  )
+
+  const wordPressPanel = (
+    <WordPressExecutionPanel
+      opportunity={opportunity}
+      isExecuting={isExecuting}
+      isVerifying={isVerifying}
+      error={executionError}
+      onDeploy={onDeploy}
+      onVerify={onVerify}
+    />
+  )
+
+  if (latest.status === 'preparation_failed') {
+    return (
+      <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Schema prepared work</div>
+        {error && <p className="text-small issue-why" style={{ marginBottom: 8 }}>{error}</p>}
+        {versionLine}
+        {reviewMode && diagnosisSummary && (
+          <p className="text-small" style={{ margin: '0 0 8px' }}>
+            <strong>{diagnosisSummary.headline}.</strong> {diagnosisSummary.detail}
+          </p>
+        )}
+        <p className="text-small issue-why">
+          {latest.payload?.reason || 'No content-defensible schema change could be generated for this page without fabricating evidence.'}
+        </p>
+        {statusBadge}
+        {diagnosisDisclosure}
+      </div>
+    )
+  }
+
+  // reviewMode's ADD/MODIFY presentation needs canonicalEntity so provider/
+  // about/publisher can show a real entity NAME (never just a bare @id
+  // URL) even for a legacy item with no per-property `.evidence` -- see
+  // lib/schemaPreparedWorkPresentation.js#buildPropertyPresentation.
+  const canonicalEntity = latest.payload?.canonicalEntity || null
+  const unresolvedDependencies = Array.isArray(latest.payload?.unresolvedDependencies) ? latest.payload.unresolvedDependencies : []
+
+  if (!reviewMode) {
+    return (
+      <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+        <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Schema prepared work</div>
+        {error && <p className="text-small issue-why" style={{ marginBottom: 8 }}>{error}</p>}
+        {versionLine}
+        <SchemaChangeList title="Current schema (kept unchanged)" items={latest.payload?.keep} />
+        <SchemaChangeList title="Proposed: add" items={latest.payload?.add} />
+        <SchemaChangeList title="Proposed: modify" items={latest.payload?.modify} />
+        {canonicalEntity && !canonicalEntity.resolved && (
+          <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
+            Canonical Organization @id not resolved ({canonicalEntity.source}) -- entity references were omitted rather than fabricated.
+          </p>
+        )}
+        {unresolvedDependencies.length > 0 && (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>Unresolved dependencies</div>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--muted)' }}>
+              {unresolvedDependencies.map((d, i) => <li key={i}>{d}</li>)}
+            </ul>
+          </div>
+        )}
+        {editingDraft === undefined ? (
+          rawJsonBlock && (
+            <>
+              <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 4 }}>Prepared JSON-LD</div>
+              {rawJsonBlock}
+            </>
+          )
+        ) : rawJsonBlock}
+        {statusBadge}
+        {approvalControls}
+        {wordPressPanel}
+      </div>
+    )
+  }
+
+  // ---- reviewMode: the redesigned AM approval layout (sections 1-13) ----
+  return (
+    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+      {error && <p className="text-small issue-why" style={{ marginBottom: 8 }}>{error}</p>}
+      {statusBadge}
+
+      {/* WHY WE'RE RECOMMENDING THIS -- derived from the real diagnosis
+          (target profile / finalStatus / Core & Recommended results), never
+          a hardcoded sentence. Section 3/5: Recommended-tier language is
+          deliberately calmer than Core-tier language. */}
+      {diagnosisSummary && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 4 }}>Why we&rsquo;re recommending this</div>
+          <p className="text-small" style={{ margin: 0 }}>
+            <span className={`issue-badge ${diagnosisSummary.severity === 'core' ? 'issue-critical' : 'issue-minor'}`} style={{ marginRight: 6 }}>
+              {diagnosisSummary.headline}
+            </span>
+          </p>
+          {diagnosisSummary.detail && <p className="text-tiny text-muted" style={{ margin: '6px 0 0' }}>{diagnosisSummary.detail}</p>}
+        </div>
+      )}
+
+      {/* WHAT WE'D ADD / MODIFY -- generalized, per-property, evidence-backed
+          presentation (sections 6/7) instead of a single prose sentence. */}
+      <SchemaChangeList title="What we&rsquo;d add" kind="add" items={latest.payload?.add} detailed canonicalEntity={canonicalEntity} />
+      <SchemaChangeList title="What we&rsquo;d modify" kind="modify" items={latest.payload?.modify} detailed canonicalEntity={canonicalEntity} />
+      <SchemaChangeList title="What we&rsquo;d remove" kind="remove" items={latest.payload?.remove} detailed canonicalEntity={canonicalEntity} />
+
+      {canonicalEntity && !canonicalEntity.resolved && (
+        <p className="text-tiny text-muted" style={{ margin: '0 0 8px' }}>
+          Canonical Organization @id not resolved ({canonicalEntity.source}) -- entity references were omitted rather than fabricated.
+        </p>
+      )}
+
+      {/* WHAT WE'RE DELIBERATELY LEAVING OUT (section 9) -- ONLY for a
+          successfully prepared artifact (this whole branch is unreachable
+          for latest.status === 'preparation_failed', handled separately
+          above) -- an unresolved dependency here is never the reason
+          preparation failed; it's an optional property this evidence
+          standard chose not to populate. */}
+      {unresolvedDependencies.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 6 }}>What we&rsquo;re deliberately leaving out</div>
+          <div style={{ display: 'grid', gap: 8, marginBottom: 6 }}>
+            {unresolvedDependencies.map((d, i) => {
+              const { property, reason } = parseUnresolvedDependency(d)
+              return (
+                <div key={i} className="issue-item">
+                  <span className="issue-badge issue-info">Not added</span>
+                  {property && <div style={{ fontSize: 13, fontWeight: 600, marginTop: 4 }}>{property}</div>}
+                  <p className="text-small issue-why">{reason}</p>
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-tiny text-muted" style={{ margin: 0 }}>
+            These aren&rsquo;t errors. We leave properties out when the available evidence isn&rsquo;t strong enough to support them.
+          </p>
+        </div>
+      )}
+
+      {/* WHAT STAYS UNTOUCHED (section 10). */}
+      {Array.isArray(latest.payload?.keep) && latest.payload.keep.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontWeight: 600, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--muted)', marginBottom: 4 }}>What stays untouched</div>
+          <p className="text-small" style={{ margin: '0 0 4px' }}>{latest.payload.keep.join(', ')}</p>
+          <p className="text-tiny text-muted" style={{ margin: 0 }}>
+            Existing site/plugin schema remains unchanged -- this only adds or modifies the page-specific block described above.
+          </p>
+        </div>
+      )}
+
+      {/* APPROVAL DECISION -- moved above the technical disclosures
+          (section 11): the AM decides after the human-readable proposal,
+          not after a JSON dump. */}
+      {approvalControls}
+
+      {editingDraft !== undefined && (
+        <div style={{ marginTop: 12 }}>
+          {rawJsonBlock}
+        </div>
+      )}
+
+      {diagnosisDisclosure}
+
+      {/* VIEW RAW JSON-LD -- collapsed by default (section 12); still the
+          exact same raw payload, never removed. */}
+      {editingDraft === undefined && rawJsonBlock && (
+        <div style={{ marginTop: 8 }}>
+          <button className="btn btn-secondary" onClick={() => setShowRawJson(v => !v)}>
+            {showRawJson ? 'Hide raw JSON-LD' : 'View raw JSON-LD'}
+          </button>
+          {showRawJson && <div style={{ marginTop: 10 }}>{rawJsonBlock}</div>}
+        </div>
+      )}
+
+      {wordPressPanel}
     </div>
   )
 }
@@ -738,15 +974,29 @@ function PreparedWorkPanel({
 // current activeWorkItem. Purely presentational; never fetches, never
 // mutates state. Renders nothing when there is nothing to show (no
 // homepage entry and no queued pages yet).
-const WORK_QUEUE_STATE_COPY = {
+// CURRENT_STATUS_COMPACT_LABEL -- 2026-09-23 UI audit, section 15: this
+// used to show the raw diagnostic PAGE state (WORK_QUEUE_STATE_COPY,
+// e.g. "Actionable gap") even once real prepared work existed and the
+// page was actually awaiting an AM's approval -- a page could show
+// "Actionable gap" here AND "AWAITING APPROVAL" in its own review card at
+// the same time, reading as two competing opinions about the same page.
+// This maps deriveCurrentSchemaStatus's already-ranked `.code` (the SAME
+// current-lifecycle-truth precedence PreparedWorkPanel's own badge uses)
+// onto the short, sentence-case vocabulary this compact queue already
+// used, rather than inventing a second precedence rule.
+const CURRENT_STATUS_COMPACT_LABEL = {
   COMPLETED: 'Verified',
+  VERIFICATION_FAILED: 'Verification failed',
+  DEPLOYED: 'Deployed — awaiting verification',
+  APPROVED: 'Approved — ready to publish',
+  AWAITING_APPROVAL: 'Awaiting approval',
+  REJECTED: 'Rejected',
+  READY_TO_PREPARE: 'Actionable gap',
   NO_ACTION_NEEDED: 'No action needed',
-  WORK_IN_PROGRESS: 'In progress',
-  ACTIONABLE_GAP: 'Actionable gap',
-  UNANALYZED: 'Not prepared'
+  NOT_ANALYZED: 'Not prepared'
 }
 
-function WorkQueueSummary({ homepageEntry, pageStates, queuedDossiers, activeWorkItem }) {
+function WorkQueueSummary({ homepageEntry, pageStates, queuedDossiers, activeWorkItem, preparedWorkByPath }) {
   const items = []
   if (homepageEntry) {
     items.push({ path: homepageEntry.path, label: 'Homepage', state: getPageState(pageStates, homepageEntry.path) })
@@ -765,11 +1015,14 @@ function WorkQueueSummary({ homepageEntry, pageStates, queuedDossiers, activeWor
           const isActive = activeWorkItem?.path === item.path
           const isDone = item.state === 'COMPLETED' || item.state === 'NO_ACTION_NEEDED'
           const marker = isDone ? '✓' : isActive ? '→' : '○'
+          const opportunity = preparedWorkByPath?.get(item.path)?.opportunity
+          const currentStatus = deriveCurrentSchemaStatus({ pageState: item.state, opportunity })
+          const label = CURRENT_STATUS_COMPACT_LABEL[currentStatus.code] || item.state
           return (
             <div key={item.path} className="text-small" style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontWeight: isActive ? 600 : 400 }}>
               <span>{marker}</span>
               <span>{item.path}</span>
-              <span className="text-muted">&mdash; {item.label} &mdash; {WORK_QUEUE_STATE_COPY[item.state] || item.state}</span>
+              <span className="text-muted">&mdash; {item.label} &mdash; {label}</span>
             </div>
           )
         })}
@@ -2339,6 +2592,7 @@ export default function SchemaWizard({ pillar, clientId, client }) {
             pageStates={pageStates}
             queuedDossiers={queuedDossiers}
             activeWorkItem={activeWorkItem}
+            preparedWorkByPath={preparedWorkByPath}
           />
           {activeWorkItem.type === 'home' ? (
             <SchemaGenerator
@@ -2371,8 +2625,13 @@ export default function SchemaWizard({ pillar, clientId, client }) {
                     <div className="grade-title" style={{ marginBottom: 2 }}>
                       {item.path} &mdash; {item.analysis?.classification?.type || item.dossier?.type || 'Page'}
                     </div>
-                    <PageAnalysisResult analysis={item.analysis} />
-                    <PreparedWorkPanel path={item.path} analysis={item.analysis} {...preparedWorkPanelProps(item.path)} />
+                    {/* 2026-09-23 Step 4 AM Review UI correction: the full
+                        diagnosis (Core/Recommended check list) no longer
+                        renders unconditionally above the approval decision
+                        -- PreparedWorkPanel's layout="review" now owns it
+                        as its own collapsed "View diagnosis" disclosure, so
+                        it isn't shown twice. */}
+                    <PreparedWorkPanel path={item.path} analysis={item.analysis} layout="review" {...preparedWorkPanelProps(item.path)} />
                   </div>
                 ))}
               </div>
@@ -2489,7 +2748,12 @@ export default function SchemaWizard({ pillar, clientId, client }) {
             <button className="btn btn-secondary" onClick={() => setStep(step - 1)}>&larr; Back</button>
             {step < 6 && (
               <button className="btn btn-primary" onClick={() => setStep(step + 1)}>
-                {step === 4 ? 'Publish to WordPress →' : 'Verify →'}
+                {/* 2026-09-23 UI audit, section 13: this is step
+                    navigation only (advances `step`), never a publish
+                    action -- "Publish to WordPress →" on a still-pending-
+                    approval screen was a real mislabel risk sitting right
+                    next to Approve. */}
+                {step === 4 ? 'Go to Publish →' : 'Verify →'}
               </button>
             )}
           </div>
