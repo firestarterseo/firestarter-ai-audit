@@ -164,7 +164,14 @@ async function POST(request, { params }) {
   // manual execution or a future prepared-work version.
   const deployable = buildDeployableSchema(preparedWorkRow.payload)
   if (!deployable.ok) {
-    return Response.json({ error: EXECUTION_BLOCKED_MESSAGE, reason: deployable.reason, code: deployable.code, blocked: true }, { status: 409 })
+    // 2026-09-24: an ARTIFACT_INTEGRITY_MISMATCH block carries `diffs`
+    // (see lib/schemaArtifactIntegrity.js) -- included here, when present,
+    // so a blocked deploy is diagnosable from the response alone rather
+    // than just named.
+    return Response.json({
+      error: EXECUTION_BLOCKED_MESSAGE, reason: deployable.reason, code: deployable.code, blocked: true,
+      diffs: deployable.diffs || undefined
+    }, { status: 409 })
   }
 
   const absoluteUrl = resolvePageUrl(client.url, path)

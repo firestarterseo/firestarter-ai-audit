@@ -12,6 +12,7 @@ import {
 import {
   summarizeDiagnosisForApproval, checkSeverityTone, buildChangePresentation, parseUnresolvedDependency
 } from '../../../lib/schemaPreparedWorkPresentation'
+import { resolveLifecycleActionOutcome } from '../../../lib/schemaLifecycleActionResult'
 import { mergeDurableQueuedPaths, mergeDurableAnalyses } from '../../../lib/schemaPageHydration'
 import { runWithBoundedConcurrency } from '../../../lib/schemaBatchAnalysis'
 
@@ -1809,11 +1810,24 @@ export default function SchemaWizard({ pillar, clientId, client }) {
         body: JSON.stringify({ action, ...extra })
       })
       const body = await res.json().catch(() => null)
+      // APPROVAL UX CORRECTION (2026-09-24, Part 3/section 9) -- this UI
+      // must never show "Approved" (or any other post-action status) on
+      // the strength of the POST alone; resolveLifecycleActionOutcome is
+      // the one, tested decision (lib/schemaLifecycleActionResult.js) for
+      // both "did the server confirm this" and "did the follow-up
+      // re-read confirm it too" -- an action that saved server-side but
+      // couldn't be re-confirmed surfaces as a visible, honest
+      // uncertainty, never silently looks unchanged.
       if (!res.ok) {
-        setPreparedWorkErrors(prev => new Map(prev).set(path, body?.error || `Request failed (HTTP ${res.status}).`))
+        const outcome = resolveLifecycleActionOutcome({ ok: false, status: res.status, body, refreshConfirmed: false })
+        setPreparedWorkErrors(prev => new Map(prev).set(path, outcome.error))
         return
       }
-      await refreshPreparedWork(path)
+      const refreshConfirmed = await refreshPreparedWork(path)
+      const outcome = resolveLifecycleActionOutcome({ ok: true, status: res.status, body, refreshConfirmed })
+      if (!outcome.confirmed) {
+        setPreparedWorkErrors(prev => new Map(prev).set(path, outcome.error))
+      }
       if (action === 'prepare_edited_version') {
         setEditingDrafts(prev => {
           if (!prev.has(path)) return prev
