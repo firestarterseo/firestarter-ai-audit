@@ -12,7 +12,7 @@ import {
 import {
   summarizeDiagnosisForApproval, checkSeverityTone, buildChangePresentation, parseUnresolvedDependency
 } from '../../../lib/schemaPreparedWorkPresentation'
-import { resolveLifecycleActionOutcome } from '../../../lib/schemaLifecycleActionResult'
+import { resolveLifecycleActionOutcome, resolveApprovalAction, resolveRejectionAction } from '../../../lib/schemaLifecycleActionResult'
 import { mergeDurableQueuedPaths, mergeDurableAnalyses } from '../../../lib/schemaPageHydration'
 import { runWithBoundedConcurrency } from '../../../lib/schemaBatchAnalysis'
 
@@ -1950,12 +1950,13 @@ export default function SchemaWizard({ pillar, clientId, client }) {
   // (edited_then_approved vs approved) -- see that file and the shared
   // lifecycle route's own comments on why this distinction matters.
   function approvePreparedWork(path, opportunityId, latest) {
-    const action = latest.created_by === 'am' ? 'edit_then_approve' : 'approve'
-    runOpportunityLifecycleAction(path, opportunityId, action, { preparedWorkId: latest.id })
+    const { action, extra } = resolveApprovalAction(latest)
+    runOpportunityLifecycleAction(path, opportunityId, action, extra)
   }
 
   function rejectPreparedWork(path, opportunityId) {
-    runOpportunityLifecycleAction(path, opportunityId, 'reject', { reason: 'am_rejected' })
+    const { action, extra } = resolveRejectionAction()
+    runOpportunityLifecycleAction(path, opportunityId, action, extra)
   }
 
   function toggleAnalysisExpanded(path) {
